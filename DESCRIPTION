@@ -25,3 +25,5 @@ Imports:
     secretbase,
     storr,
     tibble,
+Remotes: 
+    traitecoevo/plant@develop
