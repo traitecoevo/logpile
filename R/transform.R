@@ -5,9 +5,7 @@
 #' @param model_prefix Character prefix of the model, e.g. "FF16".
 #' @param fn A function mapping a raw log to an enriched log.
 register_transform <- function(model_prefix, fn) {
-  if (!is.character(model_prefix) || length(model_prefix) != 1L) {
-    stop("'model_prefix' must be a scalar character", call. = FALSE)
-  }
+  assert_scalar_character(model_prefix)
   if (!is.function(fn)) {
     stop("'fn' must be a function", call. = FALSE)
   }
@@ -23,9 +21,7 @@ get_transform <- function(model_id) {
   if (is.null(model_id)) {
     return(identity)
   }
-  if (!is.character(model_id) || length(model_id) != 1L) {
-    stop("'model_id' must be a scalar character", call. = FALSE)
-  }
+  assert_scalar_character(model_id)
   prefix <- parse_model_id(model_id)$model
   .transform_registry[[prefix]] %||% identity
 }

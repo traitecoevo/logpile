@@ -25,8 +25,8 @@ test_that("transform_ff16 adds basal_area, density, diameter", {
   # density = exp(log_density)
   expect_equal(result$density, exp(df$log_density))
 
-  # diameter = 2 * sqrt(basal_area / pi)
-  expect_equal(result$diameter, 2.0 * sqrt(result$basal_area / pi))
+  # diameter = 0.01 * height^1.4
+  expect_equal(result$diameter, 0.01 * result$height^1.4)
 
   # basal_area > 0 when height > 0
   expect_true(all(result$basal_area > 0.0))
@@ -163,4 +163,49 @@ test_that("projection_of errors if proj_fn has no version attribute", {
 
   bare_fn <- function(df) df
   expect_error(projection_of(h, bare_fn, pile = pile), "version")
+})
+
+test_that("weighted_mean computes expected values and falls back correctly", {
+  # Equal weights
+  expect_equal(weighted_mean(c(1, 2, 3), c(1, 1, 1)), 2.0)
+  
+  # Different weights
+  expect_equal(weighted_mean(c(10, 20), c(1, 3)), 17.5)
+  
+  # Sum of weights <= 0 falls back to mean
+  expect_equal(weighted_mean(c(10, 20), c(-1, 0)), 15.0)
+  expect_equal(weighted_mean(c(10, 20), c(0, 0)), 15.0)
+  
+  # All NA weights falls back to mean
+  expect_equal(weighted_mean(c(10, 20), c(NA, NA)), 15.0)
+})
+
+test_that("project_runs bulk path computes and caches multiple runs", {
+  pile <- create_pile(tempfile("proj_bulk_"))
+  on.exit(unlink(pile$path, recursive = TRUE), add = TRUE)
+  set_active_pile(pile)
+
+  r1 <- make_mock_request(model_id = "FF16@v1", lma = 0.1)
+  r2 <- make_mock_request(model_id = "FF16@v1", lma = 0.2)
+  h1 <- request_fingerprint(r1); l1 <- make_mock_log(h1); pile_put(pile, h1, l1, list(request=r1))
+  h2 <- request_fingerprint(r2); l2 <- make_mock_log(h2); pile_put(pile, h2, l2, list(request=r2))
+
+  proj <- projection(function(df) data.frame(sum_h = sum(df$height, na.rm=TRUE)), projection_version = "bulk_test@v1")
+
+  fps <- c(h1, h2)
+  res <- project_runs(fps, proj, "FF16@v1", pile)
+
+  # assert combined frame has both fps and the projection columns
+  expect_s3_class(res, "data.frame")
+  expect_true("run_fingerprint" %in% names(res))
+  expect_true("sum_h" %in% names(res))
+  expect_true(all(fps %in% res$run_fingerprint))
+
+  # a projection record exists per fp pointing at the written part file
+  rec1 <- pile$st$get(h1, namespace = "bulk_test@v1")
+  rec2 <- pile$st$get(h2, namespace = "bulk_test@v1")
+  expect_equal(rec1$status, "done")
+  expect_equal(rec2$status, "done")
+  expect_true(grepl("^part-.*\\.parquet$", basename(rec1$path)))
+  expect_equal(rec1$path, rec2$path)
 })

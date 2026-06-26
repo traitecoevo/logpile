@@ -38,3 +38,25 @@ test_that("run_plant records failures as data via PlantFailure", {
   expect_match(res$reason, "setup_error|exception")
   expect_match(res$message, "inviable|negative|NaN|must be positive|non-positive|TRUE/FALSE", ignore.case = TRUE)
 })
+
+test_that("coerce_log maps cohorts, drops seed row, and casts types without plant", {
+  schedule <- list(c(0.0, 1.0), c(0.0, 1.0, 2.0))
+  fp <- "test_fp_123"
+
+  df <- tibble::tibble(
+    step = c(1, 1, 1,  1, 1, 1, 1),
+    species = c(1, 1, 1,  2, 2, 2, 2),
+    node = c(1, 2, 3,  1, 2, 3, 4),
+    time = c(3.0, 3.0, 3.0,  3.0, 3.0, 3.0, 3.0),
+    height = c(5L, 4L, 0L,  10L, 8L, 6L, 0L)
+  )
+
+  res <- coerce_log(df, fp, schedule)
+
+  expect_equal(nrow(res), 5L)
+  expect_equal(res$strategy_id, c(0L, 0L, 1L, 1L, 1L))
+  expect_equal(res$cohort_id, c(1L, 2L, 1L, 2L, 3L))
+  expect_equal(res$birth_time, c(0.0, 1.0, 0.0, 1.0, 2.0))
+  expect_type(res$height, "double")
+  expect_equal(res$height, c(5.0, 4.0, 10.0, 8.0, 6.0))
+})

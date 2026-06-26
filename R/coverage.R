@@ -1,3 +1,6 @@
+empty_coords <- function()
+  data.frame(run_fingerprint = character(0), status = character(0), stringsAsFactors = FALSE)
+
 #' Extract Design Space Coordinates from Pile
 #'
 #' Scans the index namespace and returns a data frame of evaluated coordinates.
@@ -11,14 +14,14 @@ coords <- function(model, pile = get_active_pile()) {
   cov_dir <- fs::path(pile$path, "coverage", sprintf("model=%s", model))
   
   if (!fs::dir_exists(cov_dir)) {
-    return(data.frame(run_fingerprint = character(0), status = character(0), stringsAsFactors = FALSE))
+    return(empty_coords())
   }
   
   ds <- arrow::open_dataset(cov_dir, format = "parquet")
   df <- dplyr::collect(ds)
   
   if (nrow(df) == 0L) {
-    return(data.frame(run_fingerprint = character(0), status = character(0), stringsAsFactors = FALSE))
+    return(empty_coords())
   }
   
   st <- pile$st
@@ -51,60 +54,50 @@ coords <- function(model, pile = get_active_pile()) {
 #' @param pile A `logpile_pile` object.
 #' @return A list with `nn.idx` and `nn.dists`.
 #' @export
+# Coerce a query (numeric vector, matrix, or data frame) to a double matrix
+# with one column per design dimension.
+query_matrix <- function(query, dims) {
+  if (is.numeric(query) && is.vector(query)) query <- matrix(query, nrow = 1L)
+  if (is.data.frame(query))
+    query <- as.matrix(if (all(dims %in% names(query))) query[, dims, drop = FALSE] else query)
+  if (!is.matrix(query))
+    stop("Query must be a numeric vector, matrix, or data frame", call. = FALSE)
+  if (ncol(query) != length(dims))
+    stop(sprintf("Query has %d columns, but design space has %d dimensions",
+                 ncol(query), length(dims)), call. = FALSE)
+  storage.mode(query) <- "double"
+  query
+}
+
+# Cached k-d tree, rebuilt when the design set has grown 2x or shrunk.
+coverage_tree <- function(pile, model, ref_mat) {
+  cache <- pile$cache
+  key <- paste0("coverage_tree_", model)
+  skey <- paste0("coverage_tree_size_", model)
+  n <- nrow(ref_mat); size <- cache[[skey]] %||% 0L
+  if (is.null(cache[[key]]) || n >= 2L * size || n < size) {
+    cache[[key]] <- nabor::WKNND(ref_mat)
+    cache[[skey]] <- n
+  }
+  cache[[key]]
+}
+
 knn <- function(query, k = 1L, model, pile = get_active_pile()) {
   ref_df <- coords(model, pile)
   if (nrow(ref_df) == 0L) {
     stop("Cannot run KNN query on an empty pile", call. = FALSE)
   }
 
-  num_cols <- vapply(ref_df, is.numeric, logical(1))
-  numeric_names <- names(ref_df)[num_cols]
-  
+  numeric_names <- names(ref_df)[vapply(ref_df, is.numeric, logical(1))]
   if (length(numeric_names) == 0L) {
     stop("No numeric design coordinates found in pile to perform KNN search", call. = FALSE)
   }
 
-  if (is.vector(query) && is.numeric(query)) {
-    query <- matrix(query, nrow = 1L)
-  }
-  
-  if (is.matrix(query)) {
-    if (ncol(query) != length(numeric_names)) {
-      stop(sprintf("Query matrix has %d columns, but reference design space has %d numeric dimensions", ncol(query), length(numeric_names)), call. = FALSE)
-    }
-    query_mat <- query
-  } else if (is.data.frame(query)) {
-    missing_cols <- setdiff(numeric_names, names(query))
-    if (length(missing_cols) > 0L) {
-      if (ncol(query) != length(numeric_names)) {
-        stop(sprintf("Query data frame does not contain columns: %s, and column count (%d) does not match reference (%d)", 
-                     paste(missing_cols, collapse = ", "), ncol(query), length(numeric_names)), call. = FALSE)
-      }
-      query_mat <- as.matrix(query)
-    } else {
-      query_mat <- as.matrix(query[, numeric_names, drop = FALSE])
-    }
-  } else {
-    stop("Query must be a numeric vector, matrix, or data frame", call. = FALSE)
-  }
-
   ref_mat <- as.matrix(ref_df[, numeric_names, drop = FALSE])
-  if (storage.mode(ref_mat) != "double") storage.mode(ref_mat) <- "double"
-  if (storage.mode(query_mat) != "double") storage.mode(query_mat) <- "double"
+  storage.mode(ref_mat) <- "double"
   
-  cache <- pile$cache
-  tree_key <- paste0("coverage_tree_", model)
-  size_key <- paste0("coverage_tree_size_", model)
-  
-  tree <- cache[[tree_key]]
-  tree_size <- cache[[size_key]] %||% 0L
-  
-  n_ref <- nrow(ref_mat)
-  if (is.null(tree) || n_ref >= 2L * tree_size || n_ref < tree_size) {
-    tree <- nabor::WKNND(ref_mat)
-    cache[[tree_key]] <- tree
-    cache[[size_key]] <- n_ref
-  }
+  query_mat <- query_matrix(query, numeric_names)
+  tree <- coverage_tree(pile, model, ref_mat)
   
   res <- tree$query(query_mat, k = k, eps = 0, radius = 0)
   

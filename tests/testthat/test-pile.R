@@ -18,9 +18,11 @@ test_that("Pile is durable and execution is idempotent", {
   expect_equal(rec1$status, "done")
 
   # Second write (cache hit) — must be a no-op
-  pile_put(pile, h, log, list(request = req))
+  log2 <- log
+  log2$height <- log2$height + 100.0
+  pile_put(pile, h, log2, list(request = req))
   rec2 <- pile$st$get(h, namespace = "index")
-  expect_equal(rec2$created_at, rec1$created_at)
+  expect_equal(rec2$path, rec1$path)
 
   # Raw retrieval: schema
   df_disk <- pile_get(pile, h)
@@ -28,6 +30,7 @@ test_that("Pile is durable and execution is idempotent", {
   expect_true("height" %in% names(df_disk))
   expect_true(nrow(df_disk) > 0L)
   expect_equal(df_disk$run_fingerprint[1], h)
+  expect_equal(df_disk$height, log$height)
 })
 
 # Projections must compute on a cache miss, return cached data on a hit,
@@ -74,4 +77,32 @@ test_that("Projections compute on miss, cache on hit, isolate by version", {
   expect_true("mean_h" %in% names(p1))
   expect_false("max_h" %in% names(p1))
   expect_false("mean_h" %in% names(p2))
+})
+
+test_that("compaction round-trips correctly", {
+  pile <- create_pile(tempfile("compact_"))
+  on.exit(unlink(pile$path, recursive = TRUE), add = TRUE)
+  set_active_pile(pile)
+
+  r1 <- make_mock_request(model_id = "FF16@v1", lma = 0.1)
+  r2 <- make_mock_request(model_id = "FF16@v1", lma = 0.2)
+  r3 <- make_mock_request(model_id = "FF16@v1", lma = 0.3)
+  h1 <- request_fingerprint(r1); l1 <- make_mock_log(h1); pile_put(pile, h1, l1, list(request=r1))
+  h2 <- request_fingerprint(r2); l2 <- make_mock_log(h2); pile_put(pile, h2, l2, list(request=r2))
+  h3 <- request_fingerprint(r3); l3 <- make_mock_log(h3); pile_put(pile, h3, l3, list(request=r3))
+
+  compact_pile(pile, "FF16@v1")
+
+  # assert the per-run run-*.parquet files are gone
+  run_files <- list.files(file.path(pile$path, "raw", "model=FF16@v1"), pattern = "^run-.*\\.parquet$")
+  expect_equal(length(run_files), 0L)
+
+  # a single part-*.parquet exists
+  part_files <- list.files(file.path(pile$path, "raw", "model=FF16@v1"), pattern = "^part-.*\\.parquet$")
+  expect_equal(length(part_files), 1L)
+
+  # pile_get for each fp returns data equal to what was written
+  expect_equal(sort(pile_get(pile, h1)$height), sort(l1$height))
+  expect_equal(sort(pile_get(pile, h2)$height), sort(l2$height))
+  expect_equal(sort(pile_get(pile, h3)$height), sort(l3$height))
 })

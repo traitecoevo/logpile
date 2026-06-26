@@ -20,7 +20,7 @@ Requires R ≥ 4.1, `plant`, and a working Apache Arrow build. Parallel executio
 ```r
 library(logpile)
 
-pile <- create_pile("test_campaign")
+pile <- create_pile("data/test_campaign")
 set_active_pile(pile)
 
 # 1. Define model and fixed inputs

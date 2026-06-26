@@ -37,6 +37,15 @@ projection <- function(fn, projection_version, required_columns = NULL) {
   structure(fn, projection_version = projection_version, class = "logpile_projection")
 }
 
+weighted_mean <- function(x, w) {
+  sum_w <- sum(w, na.rm = TRUE)
+  if (!is.na(sum_w) && sum_w > 0.0) {
+    sum(x * w, na.rm = TRUE) / sum_w
+  } else {
+    mean(x, na.rm = TRUE)
+  }
+}
+
 #' Stand Summary Projection
 #'
 #' Generic projection that groups by t and computes a
@@ -60,15 +69,7 @@ stand_summary_fn <- function(df) {
     dplyr::summarise(
       density_total = if ("density" %in% names(df)) sum(density, na.rm = TRUE) else sum(weight, na.rm = TRUE),
       dplyr::across(dplyr::all_of(vars), list(
-        mean = ~ {
-          w <- weight
-          sum_w <- sum(w, na.rm = TRUE)
-          if (!is.na(sum_w) && sum_w > 0.0) {
-            sum(.x * w, na.rm = TRUE) / sum_w
-          } else {
-            mean(.x, na.rm = TRUE)
-          }
-        },
+        mean = ~ weighted_mean(.x, weight),
         total = ~ sum(.x * weight, na.rm = TRUE)
       ), .names = "{.col}_{.fn}"),
       .groups = "drop"
@@ -108,27 +109,11 @@ weighted_bin_summary <- function(sub_df) {
   sub_df %>%
     dplyr::group_by(bin) %>%
     dplyr::summarise(
-      mortality = {
-        w <- weight
-        sum_w <- sum(w, na.rm = TRUE)
-        if (!is.na(sum_w) && sum_w > 0.0) sum(mortality * w, na.rm = TRUE) / sum_w else mean(mortality, na.rm = TRUE)
-      },
+      mortality = weighted_mean(mortality, weight),
       basal_area_total = sum(basal_area * density, na.rm = TRUE),
-      basal_area_mean = {
-        w <- weight
-        sum_w <- sum(w, na.rm = TRUE)
-        if (!is.na(sum_w) && sum_w > 0.0) sum(basal_area * w, na.rm = TRUE) / sum_w else mean(basal_area, na.rm = TRUE)
-      },
-      height_mean = {
-        w <- weight
-        sum_w <- sum(w, na.rm = TRUE)
-        if (!is.na(sum_w) && sum_w > 0.0) sum(height * w, na.rm = TRUE) / sum_w else mean(height, na.rm = TRUE)
-      },
-      diameter_mean = {
-        w <- weight
-        sum_w <- sum(w, na.rm = TRUE)
-        if (!is.na(sum_w) && sum_w > 0.0) sum(diameter * w, na.rm = TRUE) / sum_w else mean(diameter, na.rm = TRUE)
-      },
+      basal_area_mean = weighted_mean(basal_area, weight),
+      height_mean = weighted_mean(height, weight),
+      diameter_mean = weighted_mean(diameter, weight),
       density = sum(density, na.rm = TRUE),
       .groups = "drop"
     )
@@ -175,6 +160,17 @@ size_field <- function(B, method = "quantile") {
   projection(fn, projection_version = sprintf("size_field_B%d_%s@v1", B, method), required_columns = c("height", "mortality", "log_density"))
 }
 
+# Coerce a projection id string or wrapped function into (fn, version).
+resolve_projection <- function(proj) {
+  if (is.character(proj)) return(list(fn = get_projection(proj), version = proj))
+  if (is.function(proj)) {
+    version <- attr(proj, "projection_version")
+    if (is.null(version)) stop("proj must have a 'projection_version' attribute", call. = FALSE)
+    return(list(fn = proj, version = version))
+  }
+  stop("'proj' must be a projection id string or projection function", call. = FALSE)
+}
+
 #' Get Projection from Pile
 #'
 #' Retrieves the projection of a run by fingerprint and projection id or function.
@@ -188,19 +184,9 @@ size_field <- function(B, method = "quantile") {
 projection_of <- function(fingerprint, proj, pile = get_active_pile()) {
   assert_scalar_character(fingerprint)
 
-  # Accept either a registered id string or a function directly
-  if (is.character(proj)) {
-    proj_fn <- get_projection(proj)
-    projection_version  <- proj
-  } else if (is.function(proj)) {
-    proj_fn <- proj
-    projection_version  <- attr(proj, "projection_version")
-    if (is.null(projection_version)) stop("proj must have a 'projection_version' attribute", call. = FALSE)
-  } else {
-    stop("'proj' must be a projection id string or projection function", call. = FALSE)
-  }
-
-  ns <- projection_version
+  p <- resolve_projection(proj)
+  proj_fn <- p$fn
+  ns <- p$version
 
   hit <- pile_get(pile, fingerprint, ns)
   if (!is.null(hit)) {
@@ -237,18 +223,9 @@ register_projection("size_field@v1",    size_field(10L))
 #' @return A combined data frame.
 #' @export
 project_runs <- function(fps, proj, model, pile = get_active_pile()) {
-  if (is.character(proj)) {
-    proj_fn <- get_projection(proj)
-    projection_version <- proj
-  } else if (is.function(proj)) {
-    proj_fn <- proj
-    projection_version <- attr(proj, "projection_version")
-    if (is.null(projection_version)) stop("proj must have a 'projection_version' attribute", call. = FALSE)
-  } else {
-    stop("'proj' must be a projection id string or projection function", call. = FALSE)
-  }
-
-  ns <- projection_version
+  p <- resolve_projection(proj)
+  proj_fn <- p$fn
+  ns <- p$version
   
   raw_dir <- fs::path(pile$path, "raw", sprintf("model=%s", model))
   if (!fs::dir_exists(raw_dir)) return(data.frame())
@@ -278,29 +255,17 @@ project_runs <- function(fps, proj, model, pile = get_active_pile()) {
   
   final_df <- dplyr::bind_rows(res_list)
   
-  uuid_str <- gsub("-", "", uuid::UUIDgenerate())
-  part_name <- sprintf("part-%s.parquet", uuid_str)
-  rel_path <- as.character(fs::path("projections", sprintf("projection=%s", ns), part_name))
+  rel_path <- as.character(fs::path("projections", sprintf("projection=%s", ns), part_filename()))
   final_path <- fs::path(pile$path, rel_path)
   
   fs::dir_create(fs::path_dir(final_path))
-  arrow::write_parquet(final_df, final_path)
+  tmp <- paste0(final_path, ".tmp")
+  on.exit(unlink(tmp), add = TRUE)
+  arrow::write_parquet(final_df, tmp)
+  file.rename(tmp, final_path)
   
-  for (fp in unique(final_df$run_fingerprint)) {
-    rec <- pile_get_record(pile, fp, ns)
-    if (is.null(rec) || !identical(rec$status, "done")) {
-      rec <- list(
-        status = "done",
-        type = "parquet",
-        path = rel_path,
-        row_selector = list(run_fingerprint = fp)
-      )
-    } else {
-      rec$path <- rel_path
-      rec$row_selector <- list(run_fingerprint = fp)
-    }
-    pile$st$set(fp, rec, namespace = ns)
-  }
+  fps <- unique(final_df$run_fingerprint)
+  relink_records(pile, ns, fps, rel_path, create = TRUE)
   
   as.data.frame(final_df, stringsAsFactors = FALSE)
 }

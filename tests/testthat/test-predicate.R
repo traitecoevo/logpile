@@ -81,7 +81,7 @@ test_that("self_thinning: ecologically valid slope passes", {
 test_that("predicate_set hash is order-insensitive", {
   s1 <- predicate_set(c("basal_area_bounded", "stem_density_bounded"))
   s2 <- predicate_set(c("stem_density_bounded", "basal_area_bounded"))
-  expect_identical(attr(s1, "version"), attr(s2, "version"))
+  expect_identical(as.character(s1), as.character(s2))
 })
 
 test_that("predicate_set carries projection_id per entry", {

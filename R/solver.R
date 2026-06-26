@@ -18,6 +18,20 @@ PlantFailure <- function(reason, message, last_t = NULL, partial_log = NULL) {
   )
 }
 
+# The model's hyperparameter function, configured from global settings.
+hyperpar <- function(model, global) {
+  hp <- tryCatch(plant::make_hyperpar(model), error = function(e) NULL)
+  if (is.null(hp)) return(function(m, s) m)
+  do.call(hp, global[intersect(names(global), names(formals(hp)))])
+}
+
+# Trait columns the hyperpar function synthesises (must not be fed as inputs).
+generated_cols <- function(hp_fn, strategy) {
+  dummy <- matrix(0.1, 1L, 1L, dimnames = list(NULL, "lma"))
+  gen <- tryCatch(hp_fn(dummy, strategy, filter = FALSE), error = function(e) NULL)
+  if (is.null(gen)) character(0) else setdiff(colnames(gen), "lma")
+}
+
 #' Build SCM parameters from request list
 #'
 #' Helper that handles trait matrix construction, hyperparameter expansion,
@@ -29,12 +43,7 @@ PlantFailure <- function(reason, message, last_t = NULL, partial_log = NULL) {
 build_scm <- function(req) {
   model <- parse_model_id(req$model_id)$model
 
-  hp <- tryCatch(plant::make_hyperpar(model), error = function(e) NULL)
-  hp_fn <- if (!is.null(hp)) {
-    do.call(hp, req$global[intersect(names(req$global), names(formals(hp)))])
-  } else {
-    function(m, s) m
-  }
+  hp_fn <- hyperpar(model, req$global)
 
   p <- plant::scm_base_parameters(model)
   p$patch_area <- req$global$patch_area
@@ -42,14 +51,12 @@ build_scm <- function(req) {
 
   if (length(req$strategies) > 0L) {
     s0 <- get(paste0(model, "_Strategy"), asNamespace("plant"))()
-    dummy_m <- matrix(0.1, nrow = 1L, ncol = 1L, dimnames = list(NULL, "lma"))
-    gen_res <- tryCatch(hp_fn(dummy_m, s0, filter = FALSE), error = function(e) NULL)
-    generated_cols <- if (!is.null(gen_res)) setdiff(colnames(gen_res), "lma") else character(0)
+    gen_cols <- generated_cols(hp_fn, s0)
 
     traits <- as.matrix(dplyr::bind_rows(req$strategies))
     valid_names <- c(names(s0), if (!is.null(s0$pars)) names(s0$pars) else character(0))
     input_traits <- intersect(colnames(traits), valid_names)
-    input_traits <- setdiff(input_traits, generated_cols)
+    input_traits <- setdiff(input_traits, gen_cols)
     traits <- traits[, input_traits, drop = FALSE]
 
     br <- if (is.list(req$drivers) && !is.null(req$drivers$birth_rate)) {
@@ -126,6 +133,11 @@ run_plant <- function(resolved_request) {
   )
 }
 
+add_double_cols <- function(tbl, df, exclude) {
+  for (col in setdiff(names(df), exclude)) tbl[[col]] <- as.double(df[[col]])
+  tbl
+}
+
 #' Coerce raw species log to cohort-major layout
 #'
 #' Filters out the seedling/seed row and maps active cohorts to their
@@ -138,49 +150,22 @@ run_plant <- function(resolved_request) {
 #' @return A coerced tibble with explicit schemas for Parquet serialization.
 #' @importFrom dplyr %>%
 coerce_log <- function(df, run_fingerprint, realised_schedule) {
+  exclude <- c("step", "species", "node", "time")
   if (is.null(df) || nrow(df) == 0L) {
-    res_df <- tibble::tibble(
-      run_fingerprint = character(0),
-      strategy_id = integer(0),
-      cohort_id = integer(0),
-      birth_time = double(0),
-      t = double(0)
-    )
-    if (!is.null(df)) {
-      exclude_cols <- c("step", "species", "node", "time")
-      extra_cols <- setdiff(names(df), exclude_cols)
-      for (col in extra_cols) {
-        res_df[[col]] <- double(0)
-      }
-    }
-    return(res_df)
+    skel <- tibble::tibble(run_fingerprint = character(0), strategy_id = integer(0),
+                           cohort_id = integer(0), birth_time = double(0), t = double(0))
+    return(if (is.null(df)) skel else add_double_cols(skel, df, exclude))
   }
-
-  df_coerced <- df %>%
-    dplyr::group_by(step, species) %>%
+  df <- df %>% dplyr::group_by(step, species) %>%
     dplyr::filter(if (length(node) == 0L || all(is.na(node))) FALSE else node < max(node, na.rm = TRUE)) %>%
     dplyr::ungroup()
-
-  strategy_id <- as.integer(df_coerced$species) - 1L
-  cohort_id <- as.integer(df_coerced$node)
-
-  offsets <- cumsum(c(0L, vapply(realised_schedule, length, integer(1L))))
-  birth_time <- unlist(realised_schedule)[offsets[strategy_id + 1L] + cohort_id]
-
-  res_df <- tibble::tibble(
-    run_fingerprint = as.character(run_fingerprint),
-    strategy_id = as.integer(strategy_id),
-    cohort_id = as.integer(cohort_id),
-    birth_time = as.double(birth_time),
-    t = as.double(df_coerced$time)
-  )
-
-  exclude_cols <- c("step", "species", "node", "time")
-  extra_cols <- setdiff(names(df_coerced), exclude_cols)
-  for (col in extra_cols) {
-    res_df[[col]] <- as.double(df_coerced[[col]])
-  }
-
-  res_df
+  strategy_id <- as.integer(df$species) - 1L
+  cohort_id   <- as.integer(df$node)
+  offsets     <- cumsum(c(0L, vapply(realised_schedule, length, integer(1L))))
+  birth_time  <- unlist(realised_schedule)[offsets[strategy_id + 1L] + cohort_id]
+  tbl <- tibble::tibble(run_fingerprint = as.character(run_fingerprint),
+                        strategy_id = strategy_id, cohort_id = cohort_id,
+                        birth_time = as.double(birth_time), t = as.double(df$time))
+  add_double_cols(tbl, df, exclude)
 }
 

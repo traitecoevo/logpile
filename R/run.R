@@ -37,6 +37,18 @@ get_build_hash <- function() {
   .run_env$build_hash
 }
 
+write_coverage <- function(pile, model_id, coords, fps) {
+  cov_df <- coords
+  cov_df$log_q <- NULL
+  cov_df$run_fingerprint <- fps
+  cov_df$status <- "pending"
+  
+  uuid_str <- gsub("-", "", uuid::UUIDgenerate())
+  cov_file <- fs::path(pile$path, "coverage", sprintf("model=%s", model_id), sprintf("part-%s.parquet", uuid_str))
+  fs::dir_create(fs::path_dir(cov_file))
+  arrow::write_parquet(cov_df, cov_file)
+}
+
 #' Run Campaign Manifest Idempotently
 #'
 #' Evaluates a manifest of campaigns, bypassing done runs.
@@ -67,15 +79,7 @@ run <- function(manifest, pile = get_active_pile(), workers = 1L) {
   pending_idx <- which(!cached)
   model_id <- manifest$template$model_id %||% "FF16@v1"
   
-  cov_df <- manifest$coords[pending_idx, , drop = FALSE]
-  cov_df$log_q <- NULL
-  cov_df$run_fingerprint <- fps[pending_idx]
-  cov_df$status <- "pending"
-  
-  uuid_str <- gsub("-", "", uuid::UUIDgenerate())
-  cov_file <- fs::path(pile$path, "coverage", sprintf("model=%s", model_id), sprintf("part-%s.parquet", uuid_str))
-  fs::dir_create(fs::path_dir(cov_file))
-  arrow::write_parquet(cov_df, cov_file)
+  write_coverage(pile, model_id, manifest$coords[pending_idx, , drop = FALSE], fps[pending_idx])
   
   manifest$coords <- manifest$coords[pending_idx, , drop = FALSE]
   n_pending <- nrow(manifest$coords)
@@ -108,22 +112,18 @@ partition_vector <- function(x, n_chunks) {
   unname(split(x, ((seq_len(n) - 1L) %% n_chunks) + 1L))
 }
 
-get_pkg_root <- function() {
-  tryCatch({
-    res <- find.package("logpile", quiet = TRUE)
-    if (length(res) > 0 && file.exists(file.path(res, "DESCRIPTION"))) {
-      return(as.character(res))
-    }
-  }, error = function(e) NULL)
+# Walk upward from `start` until `marker` is found; NULL if never.
+find_up <- function(marker, start) {
+  dir <- fs::path_abs(start)
+  while (!file.exists(file.path(dir, marker)) && dir != fs::path_dir(dir))
+    dir <- fs::path_dir(dir)
+  if (file.exists(file.path(dir, marker))) dir else NULL
+}
 
-  tryCatch({
-    proj_root <- fs::path_abs(getwd())
-    while (!file.exists(file.path(proj_root, "DESCRIPTION")) &&
-           proj_root != fs::path_dir(proj_root)) {
-      proj_root <- fs::path_dir(proj_root)
-    }
-    if (file.exists(file.path(proj_root, "DESCRIPTION"))) proj_root else NULL
-  }, error = function(e) NULL)
+get_pkg_root <- function() {
+  pkg <- find.package("logpile", quiet = TRUE)
+  if (length(pkg) && file.exists(file.path(pkg, "DESCRIPTION"))) return(pkg)
+  find_up("DESCRIPTION", getwd())
 }
 
 fallback_log_crash <- function(req, pile, err_msg) {

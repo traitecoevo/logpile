@@ -83,103 +83,64 @@ thinning_slope <- function(proj) {
 #' @export
 evaluate_predicates <- function(fps, pile, pset) {
   if (length(fps) == 0L) return(character(0))
-  
-  records <- pile$st$mget(fps, namespace = "index")
-  
-  results <- rep("missing_run", length(fps))
-  names(results) <- fps
-  
-  valid_fps <- character(0)
-  model_map <- list()
-  
-  for (i in seq_along(fps)) {
-    rec <- records[[i]]
-    if (!is.null(rec)) {
-      if (identical(rec$status, "failed")) {
-        results[fps[i]] <- "failed_run"
-      } else {
-        full_path <- fs::path(pile$path, rec$path)
-        if (!fs::file_exists(full_path)) {
-          pile$st$del(fps[i], namespace = "index")
-        } else {
-          valid_fps <- c(valid_fps, fps[i])
-          model_map[[fps[i]]] <- rec$model_id
-        }
-      }
+  cls     <- classify_runs(pile, fps)
+  results <- cls$results
+  passing <- cls$valid_fps
+  if (length(passing) == 0L) return(unname(results[fps]))
+
+  for (pid in unique(vapply(pset, function(p) p$projection_id, character(1)))) {
+    if (length(passing) == 0L) break
+    ensure_projections(pile, pid, passing, cls$model_map)
+    proj_list <- load_projections(pile, pid, passing)
+    if (is.null(proj_list)) {                 # projection dir absent
+      results[passing] <- "failed_predicate"; passing <- character(0); break
+    }
+    for (nm in predicate_names_for(pset, pid)) {
+      if (length(passing) == 0L) break
+      fn <- pset[[nm]]$fn
+      ok <- vapply(passing, function(fp)
+        isTRUE(tryCatch(fn(proj_list[[fp]] %||% data.frame()), error = function(e) FALSE)),
+        logical(1))
+      results[passing[!ok]] <- "failed_predicate"
+      passing <- passing[ok]
     }
   }
-  
-  if (length(valid_fps) == 0L) {
-    return(unname(results[fps]))
-  }
-  
-  passing_fps <- valid_fps
-  pids <- unique(vapply(pset, function(x) x$projection_id, character(1)))
-  
-  for (pid in pids) {
-    if (length(passing_fps) == 0L) break
-    
-    ns <- pid
-    
-    proj_recs <- pile$st$mget(passing_fps, namespace = ns)
-    missing_fps <- passing_fps[vapply(proj_recs, is.null, logical(1))]
-    
-    if (length(missing_fps) > 0L) {
-      models_for_missing <- vapply(missing_fps, function(fp) model_map[[fp]], character(1))
-      for (mod in unique(models_for_missing)) {
-        mod_fps <- missing_fps[models_for_missing == mod]
-        project_runs(mod_fps, pid, mod, pile)
-      }
-    }
-    
-    cache_dir <- fs::path(pile$path, "projections", sprintf("projection=%s", ns))
-    if (!fs::dir_exists(cache_dir)) {
-      results[passing_fps] <- "failed_predicate"
-      passing_fps <- character(0)
-      break
-    }
-    
-    ds <- arrow::open_dataset(cache_dir, format = "parquet")
-    ds_filtered <- ds |> dplyr::filter(run_fingerprint %in% passing_fps)
-    proj_df <- dplyr::collect(ds_filtered)
-    
-    if (nrow(proj_df) > 0L) {
-      proj_list <- split(proj_df, proj_df$run_fingerprint)
-    } else {
-      proj_list <- list()
-    }
-    
-    preds_for_pid <- base::names(pset)[vapply(pset, function(x) identical(x$projection_id, pid), logical(1))]
-    
-    for (nm in preds_for_pid) {
-      if (length(passing_fps) == 0L) break
-      entry <- pset[[nm]]
-      
-      new_passing <- character(0)
-      for (fp in passing_fps) {
-        df_fp <- proj_list[[fp]]
-        if (is.null(df_fp)) df_fp <- data.frame()
-        
-        passed <- tryCatch({
-          entry$fn(df_fp)
-        }, error = function(e) FALSE)
-        
-        if (isTRUE(passed)) {
-          new_passing <- c(new_passing, fp)
-        } else {
-          results[fp] <- "failed_predicate"
-        }
-      }
-      passing_fps <- new_passing
-    }
-  }
-  
-  for (fp in passing_fps) {
-    results[fp] <- "passed"
-  }
-  
+  results[passing] <- "passed"
   unname(results[fps])
 }
+
+classify_runs <- function(pile, fps) {
+  records <- pile$st$mget(fps, namespace = "index")
+  results <- stats::setNames(rep("missing_run", length(fps)), fps)
+  valid_fps <- character(0); model_map <- list()
+  for (i in seq_along(fps)) {
+    rec <- records[[i]]
+    if (is.null(rec)) next
+    if (identical(rec$status, "failed")) { results[fps[i]] <- "failed_run"; next }
+    if (is.null(record_path(pile, fps[i], rec, "index"))) next
+    valid_fps <- c(valid_fps, fps[i]); model_map[[fps[i]]] <- rec$model_id
+  }
+  list(results = results, valid_fps = valid_fps, model_map = model_map)
+}
+
+ensure_projections <- function(pile, pid, fps, model_map) {
+  missing <- fps[vapply(pile$st$mget(fps, namespace = pid), is.null, logical(1))]
+  if (length(missing) == 0L) return(invisible())
+  models <- vapply(missing, function(fp) model_map[[fp]], character(1))
+  for (mod in unique(models)) project_runs(missing[models == mod], pid, mod, pile)
+  invisible()
+}
+
+load_projections <- function(pile, pid, fps) {
+  dir <- fs::path(pile$path, "projections", sprintf("projection=%s", pid))
+  if (!fs::dir_exists(dir)) return(NULL)
+  df <- dplyr::collect(dplyr::filter(arrow::open_dataset(dir, format = "parquet"),
+                                     run_fingerprint %in% fps))
+  if (nrow(df) == 0L) list() else split(df, df$run_fingerprint)
+}
+
+predicate_names_for <- function(pset, pid)
+  names(pset)[vapply(pset, function(p) identical(p$projection_id, pid), logical(1))]
 
 allometry_in_range <- function(proj) {
   h <- proj$height_mean

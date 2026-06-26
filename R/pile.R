@@ -65,6 +65,15 @@ pile_get_record <- function(pile, fingerprint, storr_namespace = "index") {
   pile$st$get(fingerprint, namespace = storr_namespace)
 }
 
+# Resolve a record's file, repairing the index if it has gone missing.
+# Returns the absolute path, or NULL after deleting the phantom record.
+record_path <- function(pile, fingerprint, rec, namespace) {
+  full <- file.path(pile$path, rec$path)
+  if (file.exists(full)) return(full)
+  pile$st$del(fingerprint, namespace = namespace)
+  NULL
+}
+
 #' Get log from pile
 pile_get <- function(pile, fingerprint, storr_namespace = "index") {
   rec <- pile_get_record(pile, fingerprint, storr_namespace)
@@ -80,21 +89,12 @@ pile_get <- function(pile, fingerprint, storr_namespace = "index") {
       stop(sprintf("Simulation for fingerprint '%s' failed: %s", fingerprint, rec$failure$message), call. = FALSE)
     }
 
-    full_path <- file.path(pile$path, rec$path)
-    if (!file.exists(full_path)) {
-      pile$st$del(fingerprint, namespace = "index")
+    path <- record_path(pile, fingerprint, rec, "index")
+    if (is.null(path)) {
       stop(sprintf("Phantom index record detected and removed. Run %s will be re-executed.", fingerprint), call. = FALSE)
     }
 
-    if (is.null(rec$row_selector)) {
-      res <- arrow::read_parquet(full_path)
-    } else {
-      ds <- arrow::open_dataset(full_path, format = "parquet")
-      ds <- ds |> dplyr::filter(run_fingerprint == !!rec$row_selector$run_fingerprint)
-      res <- dplyr::collect(ds)
-    }
-
-    df <- as.data.frame(res, stringsAsFactors = FALSE)
+    df <- as.data.frame(read_run(path, rec$row_selector), stringsAsFactors = FALSE)
     transform_fn <- get_transform(rec$model_id)
     return(transform_fn(df))
   }
@@ -104,96 +104,102 @@ pile_get <- function(pile, fingerprint, storr_namespace = "index") {
   }
   
   if (identical(rec$type, "parquet")) {
-    full_path <- file.path(pile$path, rec$path)
-    if (!file.exists(full_path)) {
-      return(NULL)
-    }
-    if (is.null(rec$row_selector)) {
-      res <- arrow::read_parquet(full_path)
-    } else {
-      ds <- arrow::open_dataset(full_path, format = "parquet")
-      ds <- ds |> dplyr::filter(run_fingerprint == !!rec$row_selector$run_fingerprint)
-      res <- dplyr::collect(ds)
-    }
-    return(as.data.frame(res, stringsAsFactors = FALSE))
+    path <- record_path(pile, fingerprint, rec, storr_namespace)
+    if (is.null(path)) return(NULL)
+    return(as.data.frame(read_run(path, rec$row_selector), stringsAsFactors = FALSE))
   }
   
   NULL
 }
 
+index_record <- function(pile, fingerprint, value, meta, attempts) {
+  is_failure <- inherits(value, "PlantFailure")
+  model_id <- meta$request$model_id %||% "FF16@v1"
+  
+  if (is_failure) {
+    list(
+      status = "failed",
+      design_coords = meta$design_coords,
+      build_hash = meta$build_hash,
+      failure = list(reason = value$reason, message = value$message, last_t = value$last_t),
+      model_id = model_id,
+      attempts = attempts
+    )
+  } else {
+    bucket <- substr(fingerprint, 1, 2)
+    
+    rel_file <- write_parquet(
+      df = value,
+      pile_path = pile$path,
+      prefix = "raw",
+      model = model_id,
+      bucket = bucket,
+      filename = sprintf("run-%s-0.parquet", fingerprint)
+    )
+    
+    list(
+      status = "done",
+      path = rel_file,
+      design_coords = meta$design_coords,
+      build_hash = meta$build_hash,
+      runtime_seconds = meta$runtime_seconds,
+      solver_steps = meta$solver_steps,
+      model_id = model_id,
+      attempts = attempts
+    )
+  }
+}
+
+projection_record <- function(pile, fingerprint, value, storr_namespace) {
+  if (is.data.frame(value)) {
+    bucket <- substr(fingerprint, 1, 2)
+    rel_file <- write_parquet(
+      df = value,
+      pile_path = pile$path,
+      prefix = "projections",
+      projection = storr_namespace,
+      bucket = bucket,
+      filename = sprintf("run-%s-0.parquet", fingerprint)
+    )
+    
+    list(
+      status = "done",
+      type = "parquet",
+      path = rel_file,
+      row_selector = NULL
+    )
+  } else {
+    list(
+      status = "done",
+      type = "inline",
+      value = value
+    )
+  }
+}
+
 #' Put value into pile
 pile_put <- function(pile, fingerprint, value, meta = NULL, storr_namespace = "index") {
   existing <- pile_get_record(pile, fingerprint, storr_namespace)
-  if (!is.null(existing) && identical(existing$status, "done")) {
-    return(invisible(NULL))
-  }
-  attempts <- if (!is.null(existing) && !is.null(existing$attempts)) existing$attempts + 1L else 1L
+  if (!is.null(existing) && identical(existing$status, "done")) return(invisible(NULL))
+  attempts <- (existing$attempts %||% 0L) + 1L
 
-  if (storr_namespace == "index") {
-    is_failure <- inherits(value, "PlantFailure")
-    model_id <- meta$request$model_id %||% "FF16@v1"
-    
-    if (is_failure) {
-      rec <- list(
-        status = "failed",
-        design_coords = meta$design_coords,
-        build_hash = meta$build_hash,
-        failure = list(reason = value$reason, message = value$message, last_t = value$last_t),
-        model_id = model_id,
-        attempts = attempts
-      )
-    } else {
-      bucket <- substr(fingerprint, 1, 2)
-      
-      rel_file <- write_parquet(
-        df = value,
-        pile_path = pile$path,
-        prefix = "raw",
-        model = model_id,
-        bucket = bucket,
-        filename = sprintf("run-%s-0.parquet", fingerprint)
-      )
-      
-      rec <- list(
-        status = "done",
-        path = rel_file,
-        design_coords = meta$design_coords,
-        build_hash = meta$build_hash,
-        runtime_seconds = meta$runtime_seconds,
-        solver_steps = meta$solver_steps,
-        model_id = model_id,
-        attempts = attempts
-      )
-    }
-  } else {
-    if (is.data.frame(value)) {
-      bucket <- substr(fingerprint, 1, 2)
-      rel_file <- write_parquet(
-        df = value,
-        pile_path = pile$path,
-        prefix = "projections",
-        projection = storr_namespace,
-        bucket = bucket,
-        filename = sprintf("run-%s-0.parquet", fingerprint)
-      )
-      
-      rec <- list(
-        status = "done",
-        type = "parquet",
-        path = rel_file,
-        row_selector = NULL
-      )
-    } else {
-      rec <- list(
-        status = "done",
-        type = "inline",
-        value = value
-      )
-    }
-  }
-  
+  rec <- if (storr_namespace == "index")
+    index_record(pile, fingerprint, value, meta, attempts)
+  else
+    projection_record(pile, fingerprint, value, storr_namespace)
+
   pile$st$set(fingerprint, rec, namespace = storr_namespace)
   invisible(NULL)
+}
+
+#' Read a parquet file, optionally selecting a single run by fingerprint.
+read_run <- function(path, row_selector = NULL) {
+  if (is.null(row_selector)) {
+    arrow::read_parquet(path)
+  } else {
+    ds <- arrow::open_dataset(path, format = "parquet")
+    dplyr::collect(dplyr::filter(ds, run_fingerprint == !!row_selector$run_fingerprint))
+  }
 }
 
 
@@ -242,21 +248,56 @@ write_parquet <- function(df, pile_path, prefix, ..., filename) {
   as.character(rel_path)
 }
 
-#' Compact All Runs for a Model
-#'
-#' @param pile A logpile_pile object.
-#' @param model Model ID string.
-#' @export
-compact_pile <- function(pile, model) {
-  model_dir <- fs::path(pile$path, "raw", sprintf("model=%s", model))
-  if (!fs::dir_exists(model_dir)) return(invisible(NULL))
+part_filename <- function() sprintf("part-%s.parquet", gsub("-", "", uuid::UUIDgenerate()))
+
+prune_empty_buckets <- function(dir) {
+  for (b in fs::dir_ls(dir, type = "directory", regexp = "bucket=")) {
+    if (length(fs::dir_ls(b)) == 0L) fs::dir_delete(b)
+  }
+}
+
+#' Point records at a compacted file
+#' 
+#' With create = FALSE, records that are absent or not "done" are skipped 
+#' (index compaction). With create = TRUE, missing records are minted as 
+#' parquet records (bulk projection).
+relink_records <- function(pile, namespace, fps, rel_path, create = FALSE) {
+  records <- pile$st$mget(fps, namespace = namespace)
+  valid_idx <- if (create) {
+    rep(TRUE, length(fps))
+  } else {
+    vapply(records, function(x) !is.null(x) && identical(x$status, "done"), logical(1))
+  }
   
-  run_files <- fs::dir_ls(model_dir, recurse = TRUE, regexp = "run-.*\\.parquet$")
+  if (!any(valid_idx)) return(invisible(NULL))
+  
+  valid_fps <- fps[valid_idx]
+  valid_records <- records[valid_idx]
+  
+  for (i in seq_along(valid_records)) {
+    if (is.null(valid_records[[i]])) {
+      valid_records[[i]] <- list(status = "done", type = "parquet")
+    }
+    valid_records[[i]]$path <- rel_path
+    valid_records[[i]]$row_selector <- list(run_fingerprint = valid_fps[i])
+  }
+  
+  pile$st$mset(valid_fps, valid_records, namespace = namespace)
+  invisible(NULL)
+}
+
+# Merge every per-run parquet under one partition into a single sorted file,
+# then relink its index records. Raw runs and projections differ only in
+# directory layout, sort keys, and namespace.
+compact_partition <- function(pile, prefix, key, namespace, sort_cols) {
+  dir <- fs::path(pile$path, prefix, key)
+  if (!fs::dir_exists(dir)) return(invisible(NULL))
+  
+  run_files <- fs::dir_ls(dir, recurse = TRUE, regexp = "run-.*\\.parquet$")
   if (length(run_files) == 0L) return(invisible(NULL))
   
   ds <- arrow::open_dataset(run_files, format = "parquet")
-  
-  sort_cols <- intersect(c("run_fingerprint", "strategy_id", "cohort_id", "t"), names(ds$schema))
+  sort_cols <- intersect(sort_cols, names(ds$schema))
   if (length(sort_cols) > 0L) {
     ds <- ds |> dplyr::arrange(dplyr::across(dplyr::all_of(sort_cols)))
   }
@@ -267,36 +308,31 @@ compact_pile <- function(pile, model) {
     return(invisible(NULL))
   }
   
-  uuid_str <- gsub("-", "", uuid::UUIDgenerate())
-  part_name <- sprintf("part-%s.parquet", uuid_str)
-  rel_path <- as.character(fs::path("raw", sprintf("model=%s", model), part_name))
+  rel_path <- as.character(fs::path(prefix, key, part_filename()))
   final_path <- fs::path(pile$path, rel_path)
   
-  arrow::write_parquet(df, final_path)
+  fs::dir_create(fs::path_dir(final_path))
+  tmp <- paste0(final_path, ".tmp")
+  on.exit(unlink(tmp), add = TRUE)
+  arrow::write_parquet(df, tmp)
+  file.rename(tmp, final_path)
   
   fps <- unique(df$run_fingerprint)
-  records <- pile$st$mget(fps, namespace = "index")
-  
-  valid_idx <- vapply(records, function(x) !is.null(x) && identical(x$status, "done"), logical(1))
-  
-  if (any(valid_idx)) {
-    valid_fps <- fps[valid_idx]
-    valid_records <- records[valid_idx]
-    for (i in seq_along(valid_records)) {
-      valid_records[[i]]$path <- rel_path
-      valid_records[[i]]$row_selector <- list(run_fingerprint = valid_fps[i])
-    }
-    pile$st$mset(valid_fps, valid_records, namespace = "index")
-  }
+  relink_records(pile, namespace, fps, rel_path, create = FALSE)
   
   fs::file_delete(run_files)
-  
-  buckets <- fs::dir_ls(model_dir, type = "directory", regexp = "bucket=")
-  for (b in buckets) {
-    if (length(fs::dir_ls(b)) == 0L) fs::dir_delete(b)
-  }
-  
+  prune_empty_buckets(dir)
   invisible(NULL)
+}
+
+#' Compact All Runs for a Model
+#'
+#' @param pile A logpile_pile object.
+#' @param model Model ID string.
+#' @export
+compact_pile <- function(pile, model) {
+  compact_partition(pile, "raw", sprintf("model=%s", model), "index",
+                    c("run_fingerprint", "strategy_id", "cohort_id", "t"))
 }
 
 #' Compact Projections
@@ -305,54 +341,8 @@ compact_pile <- function(pile, model) {
 #' @param projection_version Projection version string.
 #' @export
 compact_projections <- function(pile, projection_version) {
-  proj_dir <- fs::path(pile$path, "projections", sprintf("projection=%s", projection_version))
-  if (!fs::dir_exists(proj_dir)) return(invisible(NULL))
-  
-  run_files <- fs::dir_ls(proj_dir, recurse = TRUE, regexp = "run-.*\\.parquet$")
-  if (length(run_files) == 0L) return(invisible(NULL))
-  
-  ds <- arrow::open_dataset(run_files, format = "parquet")
-  
-  sort_cols <- intersect(c("run_fingerprint", "strategy_id", "cohort_id", "t", "bin"), names(ds$schema))
-  if (length(sort_cols) > 0L) {
-    ds <- ds |> dplyr::arrange(dplyr::across(dplyr::all_of(sort_cols)))
-  }
-  
-  df <- dplyr::collect(ds)
-  if (nrow(df) == 0L) {
-    fs::file_delete(run_files)
-    return(invisible(NULL))
-  }
-  
-  uuid_str <- gsub("-", "", uuid::UUIDgenerate())
-  part_name <- sprintf("part-%s.parquet", uuid_str)
-  rel_path <- as.character(fs::path("projections", sprintf("projection=%s", projection_version), part_name))
-  final_path <- fs::path(pile$path, rel_path)
-  
-  arrow::write_parquet(df, final_path)
-  
-  fps <- unique(df$run_fingerprint)
-  records <- pile$st$mget(fps, namespace = projection_version)
-  
-  valid_idx <- vapply(records, function(x) !is.null(x) && identical(x$status, "done"), logical(1))
-  
-  if (any(valid_idx)) {
-    valid_fps <- fps[valid_idx]
-    valid_records <- records[valid_idx]
-    for (i in seq_along(valid_records)) {
-      valid_records[[i]]$path <- rel_path
-      valid_records[[i]]$row_selector <- list(run_fingerprint = valid_fps[i])
-    }
-    pile$st$mset(valid_fps, valid_records, namespace = projection_version)
-  }
-  
-  fs::file_delete(run_files)
-  
-  buckets <- fs::dir_ls(proj_dir, type = "directory", regexp = "bucket=")
-  for (b in buckets) {
-    if (length(fs::dir_ls(b)) == 0L) fs::dir_delete(b)
-  }
-  
-  invisible(NULL)
+  compact_partition(pile, "projections", sprintf("projection=%s", projection_version),
+                    projection_version,
+                    c("run_fingerprint", "strategy_id", "cohort_id", "t", "bin"))
 }
 

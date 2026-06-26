@@ -100,7 +100,7 @@ test_that("Concurrent writes do not corrupt the pile", {
 
   # Worker 1: 1:10, Worker 2: 11:20, Worker 3: 1:20 (full overlap), Worker 4: 20:1 (reverse)
   bg_args <- function(idx) list(idx, pile_path, pkg_root, all_reqs, all_fps)
-  bg_env <- c(callr::rcmd_safe_env(), SBI_STORR_BACKEND = "rds")
+  bg_env <- callr::rcmd_safe_env()
   p1 <- callr::r_bg(worker_fn, args = bg_args(1:10), env = bg_env)
   p2 <- callr::r_bg(worker_fn, args = bg_args(11:20), env = bg_env)
   p3 <- callr::r_bg(worker_fn, args = bg_args(1:20), env = bg_env)
