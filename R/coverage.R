@@ -1,5 +1,5 @@
 empty_coords <- function()
-  data.frame(run_fingerprint = character(0), status = character(0), stringsAsFactors = FALSE)
+  data.frame(fingerprint = character(0), status = character(0), stringsAsFactors = FALSE)
 
 #' Extract Design Space Coordinates from Pile
 #'
@@ -30,12 +30,12 @@ coords <- function(model, pile = get_active_pile()) {
   }
   keys <- st$list(namespace = "index")
   
-  valid_fps <- intersect(df$run_fingerprint, keys)
+  valid_fps <- intersect(df$fingerprint, keys)
   if (length(valid_fps) > 0L) {
     records <- st$mget(valid_fps, namespace = "index")
     status_map <- vapply(records, function(x) as.character(x$status %||% NA_character_), character(1))
     
-    match_idx <- match(df$run_fingerprint, valid_fps)
+    match_idx <- match(df$fingerprint, valid_fps)
     has_match <- !is.na(match_idx)
     df$status[has_match] <- status_map[match_idx[has_match]]
   }
@@ -105,7 +105,7 @@ knn <- function(query, k = 1L, model, pile = get_active_pile()) {
   
   df_res <- data.frame(
     neighbor_rank = rep(seq_len(k), each = n_query),
-    run_fingerprint = ref_df$run_fingerprint[res$nn.idx],
+    fingerprint = ref_df$fingerprint[res$nn.idx],
     distance = as.vector(res$nn.dists),
     stringsAsFactors = FALSE
   )

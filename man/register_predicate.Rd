@@ -4,10 +4,10 @@
 \alias{register_predicate}
 \title{Register a Calibration Predicate}
 \usage{
-register_predicate(name, fn, projection_id = "stand_summary@v1")
+register_predicate(id, fn, projection_id = "stand_summary@v1")
 }
 \arguments{
-\item{name}{Scalar character name.}
+\item{id}{Scalar character name.}
 
 \item{fn}{A function \verb{function(proj)} returning TRUE/FALSE.}
 

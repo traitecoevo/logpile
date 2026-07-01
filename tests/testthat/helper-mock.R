@@ -9,7 +9,7 @@ make_mock_log <- function(fingerprint, n_steps = 20L, n_cohorts = 3L) {
   n <- n_steps * n_cohorts
   heights <- cumsum(runif(n, 0.01, 0.1))
   tibble::tibble(
-    run_fingerprint = as.character(fingerprint),
+    fingerprint = as.character(fingerprint),
     strategy_id = rep(0L, n),
     cohort_id = rep(seq_len(n_cohorts + 1L)[-1L], times = n_steps),
     birth_time = 0.0,

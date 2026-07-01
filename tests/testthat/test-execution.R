@@ -33,7 +33,7 @@ test_that("Manifest generation is deterministic and recoverable", {
   req1 <- place_coords(m1$template, m1$coords[1, , drop = FALSE])
   fp1 <- request_fingerprint(req1)
   log <- make_mock_log(fp1)
-  pile_put(pile, fp1, log, list(request = req1, design_coords = list(lma = coords[1])))
+  put_log(pile, fp1, log, list(request = req1, design_coords = list(lma = coords[1])))
 
   idx <- pile$st$get(fp1, namespace = "index")
   # Extract design parameter value from design_coords
@@ -70,7 +70,7 @@ test_that("Concurrent writes do not corrupt the pile", {
     if (file.exists(file.path(proj_root, "DESCRIPTION"))) proj_root else NULL
   }, error = function(e) NULL)
 
-  worker_fn <- function(indices, pile_path, pkg_root, reqs, fps) {
+  worker_fn <- function(indices, pile_path, pkg_root, reqs, fingerprints) {
     if (!is.null(pkg_root)) {
       pkgload::load_all(pkg_root, export_all = TRUE, attach_testthat = FALSE, quiet = TRUE)
     }
@@ -91,10 +91,10 @@ test_that("Concurrent writes do not corrupt the pile", {
     pl <- create_pile(pile_path)
     for (i in indices) {
       req <- reqs[[i]]
-      fp <- fps[i]
-      if (pile_has(pl, fp)) next
+      fp <- fingerprints[i]
+      if (has_log(pl, fp)) next
       log <- mk_log(fp)
-      pile_put(pl, fp, log, list(request = req))
+      put_log(pl, fp, log, list(request = req))
     }
   }
 
@@ -145,7 +145,7 @@ test_that("Biological failures are recorded as data, not dropped", {
   )
 
   # Execution (pile$put with PlantFailure) must not halt the R session
-  expect_no_error(pile_put(pile, h_fail, failure, list(request = req_fail)))
+  expect_no_error(put_log(pile, h_fail, failure, list(request = req_fail)))
 
   # The index MUST record the failure
   rec <- pile$st$get(h_fail, namespace = "index")
@@ -154,5 +154,5 @@ test_that("Biological failures are recorded as data, not dropped", {
   expect_match(rec$failure$message, "inviable")
 
   # The raw pile MUST NOT contain a readable log for this run
-  expect_error(pile_get(pile, h_fail), "failed")
+  expect_error(get_log(pile, h_fail), "failed")
 })

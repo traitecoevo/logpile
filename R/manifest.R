@@ -68,8 +68,8 @@ place_coords <- function(template, coords) {
   if (length(coords) == 0L) return(template)
   
   req <- template
-  mid <- req$model_id %||% "FF16@v1"
-  model_type <- parse_model_id(mid)$model
+  model_id <- req$model_id %||% "FF16@v1"
+  model_type <- parse_model_id(model_id)$model
   schema <- get_model_schema(model_type)
 
   g_names <- c(names(schema$p0), schema$hp_names, "collect_all_auxiliary")

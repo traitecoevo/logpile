@@ -4,17 +4,17 @@
 \alias{evaluate_predicates}
 \title{Evaluate a Predicate Set Against Fingerprints}
 \usage{
-evaluate_predicates(fps, pile, pset)
+evaluate_predicates(fingerprints, pile, pset)
 }
 \arguments{
-\item{fps}{Character vector of SHA-256 fingerprints.}
+\item{fingerprints}{Character vector of SHA-256 fingerprints.}
 
 \item{pile}{A logpile_pile object.}
 
 \item{pset}{A \code{predicate_set} object.}
 }
 \value{
-A character vector ("passed" or "failed_predicate") of the same length as \code{fps}.
+A character vector ("passed" or "failed_predicate") of the same length as \code{fingerprints}.
 }
 \description{
 Fetches each predicate's required projection from the pile, evaluates the

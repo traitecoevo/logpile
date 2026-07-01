@@ -7,7 +7,6 @@ Description: R interface and storage management for `plant`.
 License: GPL-3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 Suggests: 
     callr,
     crew,
@@ -27,3 +26,4 @@ Imports:
     tibble,
 Remotes: 
     traitecoevo/plant@develop
+Config/roxygen2/version: 8.0.0

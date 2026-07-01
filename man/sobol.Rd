@@ -4,14 +4,14 @@
 \alias{sobol}
 \title{Sobol Space-Filling Proposal Generator}
 \usage{
-sobol(priors, n, seed = NULL)
+sobol(priors, n, seed = 42L)
 }
 \arguments{
 \item{priors}{Named list of prior ranges.}
 
 \item{n}{Number of samples.}
 
-\item{seed}{Optional integer seed.}
+\item{seed}{Optional integer seed (default: 42).}
 }
 \value{
 A data frame of coordinates.

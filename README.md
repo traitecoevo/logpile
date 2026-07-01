@@ -45,11 +45,11 @@ keep <- predicate_set(c(
 
 # 4. Run simulations
 m <- manifest(template, priors, n = 200, seed = 42)
-fps <- run(m, pile = pile)
+fingerprints <- run(m, pile = pile)
 
 # 5. Evaluate predicates and filter
-evals <- evaluate_predicates(fps, pile, keep)
-passed_fps <- fps[evals == "passed"]
+evals <- evaluate_predicates(fingerprints, pile, keep)
+passed_fps <- fingerprints[evals == "passed"]
 
 # 6. Visualize the outcome
 library(ggplot2)
@@ -88,7 +88,7 @@ Find the nearest evaluated neighbors for a given parameter set:
 query <- matrix(c(800, 10), nrow = 1)
 knn(query, k = 2, model = "FF16@v1", pile = pile)
 
-#   rho hmat neighbor_rank run_fingerprint distance
+#   rho hmat neighbor_rank fingerprint distance
 # 1 800   10             1   c9f2a4b8...   1.451884
 # 1 800   10             2   ecc9082s...   1.615842
 ```
@@ -102,7 +102,7 @@ candidates <- data.frame(
 )
 gap(candidates, n = 1, model = "FF16@v1", pile = pile)
 
-#   rho hmat run_fingerprint gap_distance
+#   rho hmat fingerprint gap_distance
 # 1 600    5     ecc9082s...     1.506975
 ```
 
@@ -131,7 +131,7 @@ You can define and register your own custom projections and predicates on the fl
 ```r
 my_proj <- projection(function(df) {
   df %>% 
-    dplyr::group_by(run_fingerprint, t) %>% 
+    dplyr::group_by(fingerprint, t) %>% 
     dplyr::summarise(max_h = max(height, na.rm = TRUE), .groups = "drop")
 }, "max_height@v1")
 

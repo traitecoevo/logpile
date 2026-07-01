@@ -4,12 +4,12 @@
 \alias{projection}
 \title{Create a Projection Function Wrapper}
 \usage{
-projection(fn, version, required_columns = NULL)
+projection(fn, id, required_columns = NULL)
 }
 \arguments{
 \item{fn}{A function mapping a transformed log dataframe to aggregated results.}
 
-\item{version}{Character string identifying the projection name/version (used for caching).}
+\item{id}{Character string identifying the projection name/version (used for caching).}
 
 \item{required_columns}{Optional character vector of raw column names.}
 }

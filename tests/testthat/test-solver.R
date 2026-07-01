@@ -9,10 +9,10 @@ test_that("run_plant successfully executes SCM and coerces the log", {
   expect_type(res, "list")
   expect_false(inherits(res, "PlantFailure"))
   expect_s3_class(res$log, "data.frame")
-  expect_true(all(c("run_fingerprint", "strategy_id", "cohort_id", "birth_time", "t", "height") %in% names(res$log)))
+  expect_true(all(c("fingerprint", "strategy_id", "cohort_id", "birth_time", "t", "height") %in% names(res$log)))
   
   resolved <- resolve_request(req)
-  expect_equal(unique(res$log$run_fingerprint), request_fingerprint(resolved))
+  expect_equal(unique(res$log$fingerprint), request_fingerprint(resolved))
   expect_true(res$runtime_seconds > 0)
   expect_true(res$solver_steps > 0)
 })
@@ -39,7 +39,7 @@ test_that("run_plant records failures as data via PlantFailure", {
   expect_match(res$message, "inviable|negative|NaN|must be positive|non-positive|TRUE/FALSE", ignore.case = TRUE)
 })
 
-test_that("coerce_log maps cohorts, drops seed row, and casts types without plant", {
+test_that("format_log maps cohorts, drops seed row, and casts types without plant", {
   schedule <- list(c(0.0, 1.0), c(0.0, 1.0, 2.0))
   fp <- "test_fp_123"
 
@@ -51,7 +51,7 @@ test_that("coerce_log maps cohorts, drops seed row, and casts types without plan
     height = c(5L, 4L, 0L,  10L, 8L, 6L, 0L)
   )
 
-  res <- coerce_log(df, fp, schedule)
+  res <- format_log(df, fp, schedule)
 
   expect_equal(nrow(res), 5L)
   expect_equal(res$strategy_id, c(0L, 0L, 1L, 1L, 1L))

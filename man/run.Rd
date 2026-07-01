@@ -17,5 +17,5 @@ run(manifest, pile = get_active_pile(), workers = 1L)
 A character vector of request fingerprints (invisibly).
 }
 \description{
-Evaluates a manifest of campaigns, bypassing done runs.
+Evaluates a manifest of campaigns, bypassing done logs.
 }

@@ -11,8 +11,8 @@ test_that("Pile is durable and execution is idempotent", {
   log <- make_mock_log(h)
 
   # First write (cache miss)
-  pile_put(pile, h, log, list(request = req))
-  expect_true(pile_has(pile, h))
+  put_log(pile, h, log, list(request = req))
+  expect_true(has_log(pile, h))
 
   rec1 <- pile$st$get(h, namespace = "index")
   expect_equal(rec1$status, "done")
@@ -20,16 +20,16 @@ test_that("Pile is durable and execution is idempotent", {
   # Second write (cache hit) — must be a no-op
   log2 <- log
   log2$height <- log2$height + 100.0
-  pile_put(pile, h, log2, list(request = req))
+  put_log(pile, h, log2, list(request = req))
   rec2 <- pile$st$get(h, namespace = "index")
   expect_equal(rec2$path, rec1$path)
 
   # Raw retrieval: schema
-  df_disk <- pile_get(pile, h)
+  df_disk <- get_log(pile, h)
   expect_s3_class(df_disk, "data.frame")
   expect_true("height" %in% names(df_disk))
   expect_true(nrow(df_disk) > 0L)
-  expect_equal(df_disk$run_fingerprint[1], h)
+  expect_equal(df_disk$fingerprint[1], h)
   expect_equal(df_disk$height, log$height)
 })
 
@@ -44,16 +44,16 @@ test_that("Projections compute on miss, cache on hit, isolate by version", {
   req <- make_mock_request(model_id = "FF16@v1", lma = 0.08)
   h <- request_fingerprint(req)
   log <- make_mock_log(h)
-  pile_put(pile, h, log, list(request = req))
+  put_log(pile, h, log, list(request = req))
 
   # Two projection objects with different version strings and different outputs
   proj_mean <- projection(function(df) {
     data.frame(mean_h = mean(df$height, na.rm = TRUE))
-  }, projection_version = "test_mean@v1")
+  }, id = "test_mean@v1")
 
   proj_max <- projection(function(df) {
     data.frame(max_h = max(df$height, na.rm = TRUE))
-  }, projection_version = "test_max@v1")
+  }, id = "test_max@v1")
 
   # 1. Compute on Miss
   p1 <- projection_of(h, proj_mean, pile = pile)
@@ -87,22 +87,22 @@ test_that("compaction round-trips correctly", {
   r1 <- make_mock_request(model_id = "FF16@v1", lma = 0.1)
   r2 <- make_mock_request(model_id = "FF16@v1", lma = 0.2)
   r3 <- make_mock_request(model_id = "FF16@v1", lma = 0.3)
-  h1 <- request_fingerprint(r1); l1 <- make_mock_log(h1); pile_put(pile, h1, l1, list(request=r1))
-  h2 <- request_fingerprint(r2); l2 <- make_mock_log(h2); pile_put(pile, h2, l2, list(request=r2))
-  h3 <- request_fingerprint(r3); l3 <- make_mock_log(h3); pile_put(pile, h3, l3, list(request=r3))
+  h1 <- request_fingerprint(r1); l1 <- make_mock_log(h1); put_log(pile, h1, l1, list(request=r1))
+  h2 <- request_fingerprint(r2); l2 <- make_mock_log(h2); put_log(pile, h2, l2, list(request=r2))
+  h3 <- request_fingerprint(r3); l3 <- make_mock_log(h3); put_log(pile, h3, l3, list(request=r3))
 
   compact_pile(pile, "FF16@v1")
 
-  # assert the per-run run-*.parquet files are gone
-  run_files <- list.files(file.path(pile$path, "raw", "model=FF16@v1"), pattern = "^run-.*\\.parquet$")
-  expect_equal(length(run_files), 0L)
+  # assert the per-run log-*.parquet files are gone
+  log_files <- list.files(file.path(pile$path, "raw", "model=FF16@v1"), pattern = "^log-.*\\.parquet$")
+  expect_equal(length(log_files), 0L)
 
   # a single part-*.parquet exists
   part_files <- list.files(file.path(pile$path, "raw", "model=FF16@v1"), pattern = "^part-.*\\.parquet$")
   expect_equal(length(part_files), 1L)
 
-  # pile_get for each fp returns data equal to what was written
-  expect_equal(sort(pile_get(pile, h1)$height), sort(l1$height))
-  expect_equal(sort(pile_get(pile, h2)$height), sort(l2$height))
-  expect_equal(sort(pile_get(pile, h3)$height), sort(l3$height))
+  # get_log for each fp returns data equal to what was written
+  expect_equal(sort(get_log(pile, h1)$height), sort(l1$height))
+  expect_equal(sort(get_log(pile, h2)$height), sort(l2$height))
+  expect_equal(sort(get_log(pile, h3)$height), sort(l3$height))
 })

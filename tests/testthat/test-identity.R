@@ -61,10 +61,10 @@ test_that("Pile handles arbitrary model schemas without modification", {
   h_mock <- paste0("deadbeef", strrep("0", 56))  # 64-char fake hash
   req <- make_mock_request(model_id = "FF16@v1", lma = 0.1)
 
-  pile_put(pile, h_mock, mock_log, list(request = req))
+  put_log(pile, h_mock, mock_log, list(request = req))
 
   # Retrieval must preserve the exact shape
-  retrieved <- pile_get(pile, h_mock)
+  retrieved <- get_log(pile, h_mock)
   expect_true("synthetic_variable_x" %in% names(retrieved))
   expect_true("synthetic_variable_y" %in% names(retrieved))
   expect_true("exotic_metric_z" %in% names(retrieved))

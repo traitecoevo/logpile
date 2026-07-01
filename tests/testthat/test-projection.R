@@ -115,7 +115,7 @@ test_that("projection_of routes log through transform_ff16 then projection and c
   req <- make_mock_request(model_id = "FF16@v1", lma = 0.09)
   h <- request_fingerprint(req)
   log <- make_mock_log(h)
-  pile_put(pile, h, log, list(request = req))
+  put_log(pile, h, log, list(request = req))
 
   # stand_summary requires diameter, which transform_ff16 adds
   result <- projection_of(h, stand_summary, pile = pile)
@@ -138,10 +138,10 @@ test_that("projection_of isolates cache by version attribute", {
   req <- make_mock_request(model_id = "FF16@v1", lma = 0.11)
   h <- request_fingerprint(req)
   log <- make_mock_log(h)
-  pile_put(pile, h, log, list(request = req))
+  put_log(pile, h, log, list(request = req))
 
-  proj_a <- projection(function(df) data.frame(col_a = 1), projection_version = "a@v1")
-  proj_b <- projection(function(df) data.frame(col_b = 2), projection_version = "b@v1")
+  proj_a <- projection(function(df) data.frame(col_a = 1), id = "a@v1")
+  proj_b <- projection(function(df) data.frame(col_b = 2), id = "b@v1")
 
   pa <- projection_of(h, proj_a, pile = pile)
   pb <- projection_of(h, proj_b, pile = pile)
@@ -152,17 +152,17 @@ test_that("projection_of isolates cache by version attribute", {
   expect_false("col_a" %in% names(pb))
 })
 
-test_that("projection_of errors if proj_fn has no version attribute", {
+test_that("projection_of errors if proj_fn has no id attribute", {
   pile <- create_pile(tempfile("proj_nover_"))
   on.exit(unlink(pile$path, recursive = TRUE), add = TRUE)
 
   req <- make_mock_request(model_id = "FF16@v1")
   h <- request_fingerprint(req)
   log <- make_mock_log(h)
-  pile_put(pile, h, log, list(request = req))
+  put_log(pile, h, log, list(request = req))
 
   bare_fn <- function(df) df
-  expect_error(projection_of(h, bare_fn, pile = pile), "version")
+  expect_error(projection_of(h, bare_fn, pile = pile), "id")
 })
 
 test_that("weighted_mean computes expected values and falls back correctly", {
@@ -180,26 +180,26 @@ test_that("weighted_mean computes expected values and falls back correctly", {
   expect_equal(weighted_mean(c(10, 20), c(NA, NA)), 15.0)
 })
 
-test_that("project_runs bulk path computes and caches multiple runs", {
+test_that("project_logs bulk path computes and caches multiple runs", {
   pile <- create_pile(tempfile("proj_bulk_"))
   on.exit(unlink(pile$path, recursive = TRUE), add = TRUE)
   set_active_pile(pile)
 
   r1 <- make_mock_request(model_id = "FF16@v1", lma = 0.1)
   r2 <- make_mock_request(model_id = "FF16@v1", lma = 0.2)
-  h1 <- request_fingerprint(r1); l1 <- make_mock_log(h1); pile_put(pile, h1, l1, list(request=r1))
-  h2 <- request_fingerprint(r2); l2 <- make_mock_log(h2); pile_put(pile, h2, l2, list(request=r2))
+  h1 <- request_fingerprint(r1); l1 <- make_mock_log(h1); put_log(pile, h1, l1, list(request=r1))
+  h2 <- request_fingerprint(r2); l2 <- make_mock_log(h2); put_log(pile, h2, l2, list(request=r2))
 
-  proj <- projection(function(df) data.frame(sum_h = sum(df$height, na.rm=TRUE)), projection_version = "bulk_test@v1")
+  proj <- projection(function(df) data.frame(sum_h = sum(df$height, na.rm=TRUE)), id = "bulk_test@v1")
 
-  fps <- c(h1, h2)
-  res <- project_runs(fps, proj, "FF16@v1", pile)
+  fingerprints <- c(h1, h2)
+  res <- project_logs(fingerprints, proj, "FF16@v1", pile)
 
-  # assert combined frame has both fps and the projection columns
+  # assert combined frame has both fingerprints and the projection columns
   expect_s3_class(res, "data.frame")
-  expect_true("run_fingerprint" %in% names(res))
+  expect_true("fingerprint" %in% names(res))
   expect_true("sum_h" %in% names(res))
-  expect_true(all(fps %in% res$run_fingerprint))
+  expect_true(all(fingerprints %in% res$fingerprint))
 
   # a projection record exists per fp pointing at the written part file
   rec1 <- pile$st$get(h1, namespace = "bulk_test@v1")

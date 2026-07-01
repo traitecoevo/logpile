@@ -24,17 +24,17 @@ get_projection <- function(id) {
 #' Create a Projection Function Wrapper
 #'
 #' @param fn A function mapping a transformed log dataframe to aggregated results.
-#' @param projection_version Character string identifying the projection name/version (used for caching).
+#' @param id Character string identifying the projection name/version (used for caching).
 #' @param required_columns Optional character vector of raw column names.
 #' @return A wrapped projection function.
 #' @export
-projection <- function(fn, projection_version, required_columns = NULL) {
-  assert_scalar_character(projection_version)
+projection <- function(fn, id, required_columns = NULL) {
+  assert_scalar_character(id)
   if (!is.function(fn)) {
     stop("'fn' must be a function", call. = FALSE)
   }
   if (!is.null(required_columns)) attr(fn, "required_columns") <- required_columns
-  structure(fn, projection_version = projection_version, class = "logpile_projection")
+  structure(fn, id = id, class = "logpile_projection")
 }
 
 weighted_mean <- function(x, w) {
@@ -61,7 +61,7 @@ stand_summary_fn <- function(df) {
 
   df$weight <- if ("density" %in% names(df)) df$density else 1.0
 
-  exclude <- c("run_fingerprint", "strategy_id", "cohort_id", "birth_time", "t", "bucket", "patch_density", "weight", "bin", "density")
+  exclude <- c("fingerprint", "strategy_id", "cohort_id", "birth_time", "t", "bucket", "patch_density", "weight", "bin", "density")
   vars <- setdiff(names(df)[vapply(df, is.numeric, logical(1))], exclude)
 
   res_df <- df %>%
@@ -80,7 +80,7 @@ stand_summary_fn <- function(df) {
 }
 
 #' @export
-stand_summary <- projection(stand_summary_fn, projection_version = "stand_summary@v1", required_columns = c("height", "mortality", "fecundity", "area_heartwood", "mass_heartwood", "log_density", "offspring_produced_survival_weighted"))
+stand_summary <- projection(stand_summary_fn, id = "stand_summary@v1", required_columns = c("height", "mortality", "fecundity", "area_heartwood", "mass_heartwood", "log_density", "offspring_produced_survival_weighted"))
 
 
 assign_bins <- function(height, B, method) {
@@ -157,15 +157,15 @@ size_field <- function(B, method = "quantile") {
     as.data.frame(res_df %>% dplyr::arrange(t, bin), stringsAsFactors = FALSE)
   }
 
-  projection(fn, projection_version = sprintf("size_field_B%d_%s@v1", B, method), required_columns = c("height", "mortality", "log_density"))
+  projection(fn, id = sprintf("size_field_B%d_%s@v1", B, method), required_columns = c("height", "mortality", "log_density"))
 }
 
 # Coerce a projection id string or wrapped function into (fn, version).
 resolve_projection <- function(proj) {
   if (is.character(proj)) return(list(fn = get_projection(proj), version = proj))
   if (is.function(proj)) {
-    version <- attr(proj, "projection_version")
-    if (is.null(version)) stop("proj must have a 'projection_version' attribute", call. = FALSE)
+    version <- attr(proj, "id")
+    if (is.null(version)) stop("proj must have a 'id' attribute", call. = FALSE)
     return(list(fn = proj, version = version))
   }
   stop("'proj' must be a projection id string or projection function", call. = FALSE)
@@ -188,22 +188,22 @@ projection_of <- function(fingerprint, proj, pile = get_active_pile()) {
   proj_fn <- p$fn
   ns <- p$version
 
-  hit <- pile_get(pile, fingerprint, ns)
+  hit <- get_log(pile, fingerprint, ns)
   if (!is.null(hit)) {
     return(hit)
   }
 
-  transformed <- pile_get(pile, fingerprint)
+  transformed <- get_log(pile, fingerprint)
   proj_df <- proj_fn(transformed)
   
   if (!is.data.frame(proj_df)) {
     stop("Projection function must return a data.frame", call. = FALSE)
   }
 
-  proj_df$run_fingerprint <- fingerprint
+  proj_df$fingerprint <- fingerprint
 
-  # Delegate to pile_put for both writing the parquet and updating the storr index
-  pile_put(pile, fingerprint, proj_df, storr_namespace = ns)
+  # Delegate to put_log for both writing the parquet and updating the storr index
+  put_log(pile, fingerprint, proj_df, namespace = ns)
   as.data.frame(proj_df, stringsAsFactors = FALSE)
 }
 
@@ -216,13 +216,13 @@ register_projection("size_field@v1",    size_field(10L))
 #' Evaluates a projection across multiple runs simultaneously using Arrow
 #' dataset pushdown for column selection and row filtering.
 #'
-#' @param fps Character vector of run fingerprints.
+#' @param fingerprints Character vector of run fingerprints.
 #' @param proj Projection id string or function.
 #' @param model Model ID string (e.g. "FF16@v1").
 #' @param pile Pile object.
 #' @return A combined data frame.
 #' @export
-project_runs <- function(fps, proj, model, pile = get_active_pile()) {
+project_logs <- function(fingerprints, proj, model, pile = get_active_pile()) {
   p <- resolve_projection(proj)
   proj_fn <- p$fn
   ns <- p$version
@@ -231,11 +231,11 @@ project_runs <- function(fps, proj, model, pile = get_active_pile()) {
   if (!fs::dir_exists(raw_dir)) return(data.frame())
   
   ds <- arrow::open_dataset(raw_dir, format = "parquet")
-  ds <- ds |> dplyr::filter(run_fingerprint %in% fps)
+  ds <- ds |> dplyr::filter(fingerprint %in% fingerprints)
   
   req_cols <- attr(proj_fn, "required_columns")
   if (!is.null(req_cols)) {
-    base_cols <- c("run_fingerprint", "strategy_id", "cohort_id", "birth_time", "t", "bucket", "patch_density")
+    base_cols <- c("fingerprint", "strategy_id", "cohort_id", "birth_time", "t", "bucket", "patch_density")
     select_cols <- unique(c(base_cols, req_cols))
     select_cols <- intersect(select_cols, names(ds))
     ds <- ds |> dplyr::select(dplyr::all_of(select_cols))
@@ -246,10 +246,10 @@ project_runs <- function(fps, proj, model, pile = get_active_pile()) {
   
   transform_fn <- get_transform(model)
   
-  res_list <- lapply(split(raw_df, raw_df$run_fingerprint), function(sub_df) {
+  res_list <- lapply(split(raw_df, raw_df$fingerprint), function(sub_df) {
     tr_df <- transform_fn(sub_df)
     p_df <- proj_fn(tr_df)
-    p_df$run_fingerprint <- sub_df$run_fingerprint[1L]
+    p_df$fingerprint <- sub_df$fingerprint[1L]
     p_df
   })
   
@@ -264,8 +264,8 @@ project_runs <- function(fps, proj, model, pile = get_active_pile()) {
   arrow::write_parquet(final_df, tmp)
   file.rename(tmp, final_path)
   
-  fps <- unique(final_df$run_fingerprint)
-  relink_records(pile, ns, fps, rel_path, create = TRUE)
+  fingerprints <- unique(final_df$fingerprint)
+  relink_records(pile, ns, fingerprints, rel_path, create = TRUE)
   
   as.data.frame(final_df, stringsAsFactors = FALSE)
 }

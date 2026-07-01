@@ -4,13 +4,13 @@
 \alias{predicate_set}
 \title{Define a Predicate Set}
 \usage{
-predicate_set(names)
+predicate_set(ids)
 }
 \arguments{
-\item{names}{Character vector of registered predicate names.}
+\item{ids}{Character vector of registered predicate ids.}
 }
 \value{
-A named list with class \code{predicate_set} and a \code{version} attribute.
+A named list with class \code{predicate_set} and a \code{predicate_set_fingerprint} attribute.
 }
 \description{
 Define a Predicate Set

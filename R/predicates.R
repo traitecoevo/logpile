@@ -2,43 +2,43 @@
 
 #' Register a Calibration Predicate
 #'
-#' @param name Scalar character name.
+#' @param id Scalar character name.
 #' @param fn A function `function(proj)` returning TRUE/FALSE.
 #' @param projection_id The projection this predicate operates on (e.g. "stand_summary@v1").
 #' @export
-register_predicate <- function(name, fn, projection_id = "stand_summary@v1") {
-  assert_scalar_character(name)
+register_predicate <- function(id, fn, projection_id = "stand_summary@v1") {
+  assert_scalar_character(id)
   assert_scalar_character(projection_id)
   if (!is.function(fn)) stop("'fn' must be a function", call. = FALSE)
-  .predicate_registry[[name]] <- list(fn = fn, projection_id = projection_id)
-  invisible(name)
+  .predicate_registry[[id]] <- list(fn = fn, id = projection_id)
+  invisible(id)
 }
 
 #' @keywords internal
-get_predicate <- function(name) {
-  p <- .predicate_registry[[name]]
-  if (is.null(p)) stop(sprintf("predicate '%s' not found in registry", name), call. = FALSE)
+get_predicate <- function(id) {
+  p <- .predicate_registry[[id]]
+  if (is.null(p)) stop(sprintf("predicate '%s' not found in registry", id), call. = FALSE)
   p
 }
 
 #' Define a Predicate Set
 #'
-#' @param names Character vector of registered predicate names.
-#' @return A named list with class `predicate_set` and a `predicate_set_hash` attribute.
+#' @param ids Character vector of registered predicate ids.
+#' @return A named list with class `predicate_set` and a `predicate_set_fingerprint` attribute.
 #' @export
-predicate_set <- function(names) {
-  entries <- lapply(names, get_predicate)
-  base::names(entries) <- names
+predicate_set <- function(ids) {
+  entries <- lapply(ids, get_predicate)
+  base::names(entries) <- ids
   # Hash sorted names only — deparse() is unstable across R versions
-  set_hash <- secretbase::sha256(
-    secretbase::cborenc(normalize_for_cbor(as.list(sort(names)))),
+  set_fingerprint <- secretbase::sha256(
+    secretbase::cborenc(normalize_for_cbor(as.list(sort(ids)))),
     convert = TRUE
   )
-  structure(entries, predicate_set_hash = set_hash, class = "predicate_set")
+  structure(entries, predicate_set_fingerprint = set_fingerprint, class = "predicate_set")
 }
 
 #' @export
-as.character.predicate_set <- function(x, ...) attr(x, "predicate_set_hash")
+as.character.predicate_set <- function(x, ...) attr(x, "predicate_set_fingerprint")
 
 all_within <- function(x, lo, hi) {
   if (length(x) == 0L) return(TRUE)
@@ -76,26 +76,26 @@ thinning_slope <- function(proj) {
 #' Fetches each predicate's required projection from the pile, evaluates the
 #' conjunction, and returns "passed" or "failed_predicate" for each fingerprint.
 #'
-#' @param fps Character vector of SHA-256 fingerprints.
+#' @param fingerprints Character vector of SHA-256 fingerprints.
 #' @param pile A logpile_pile object.
 #' @param pset A `predicate_set` object.
-#' @return A character vector ("passed" or "failed_predicate") of the same length as `fps`.
+#' @return A character vector ("passed" or "failed_predicate") of the same length as `fingerprints`.
 #' @export
-evaluate_predicates <- function(fps, pile, pset) {
-  if (length(fps) == 0L) return(character(0))
-  cls     <- classify_runs(pile, fps)
+evaluate_predicates <- function(fingerprints, pile, pset) {
+  if (length(fingerprints) == 0L) return(character(0))
+  cls     <- classify_logs(pile, fingerprints)
   results <- cls$results
   passing <- cls$valid_fps
-  if (length(passing) == 0L) return(unname(results[fps]))
+  if (length(passing) == 0L) return(unname(results[fingerprints]))
 
-  for (pid in unique(vapply(pset, function(p) p$projection_id, character(1)))) {
+  for (id in unique(vapply(pset, function(p) p$id, character(1)))) {
     if (length(passing) == 0L) break
-    ensure_projections(pile, pid, passing, cls$model_map)
-    proj_list <- load_projections(pile, pid, passing)
+    ensure_projections(pile, id, passing, cls$model_map)
+    proj_list <- load_projections(pile, id, passing)
     if (is.null(proj_list)) {                 # projection dir absent
       results[passing] <- "failed_predicate"; passing <- character(0); break
     }
-    for (nm in predicate_names_for(pset, pid)) {
+    for (nm in predicate_names_for(pset, id)) {
       if (length(passing) == 0L) break
       fn <- pset[[nm]]$fn
       ok <- vapply(passing, function(fp)
@@ -106,41 +106,41 @@ evaluate_predicates <- function(fps, pile, pset) {
     }
   }
   results[passing] <- "passed"
-  unname(results[fps])
+  unname(results[fingerprints])
 }
 
-classify_runs <- function(pile, fps) {
-  records <- pile$st$mget(fps, namespace = "index")
-  results <- stats::setNames(rep("missing_run", length(fps)), fps)
+classify_logs <- function(pile, fingerprints) {
+  records <- pile$st$mget(fingerprints, namespace = "index")
+  results <- stats::setNames(rep("missing_run", length(fingerprints)), fingerprints)
   valid_fps <- character(0); model_map <- list()
-  for (i in seq_along(fps)) {
+  for (i in seq_along(fingerprints)) {
     rec <- records[[i]]
     if (is.null(rec)) next
-    if (identical(rec$status, "failed")) { results[fps[i]] <- "failed_run"; next }
-    if (is.null(record_path(pile, fps[i], rec, "index"))) next
-    valid_fps <- c(valid_fps, fps[i]); model_map[[fps[i]]] <- rec$model_id
+    if (identical(rec$status, "failed")) { results[fingerprints[i]] <- "failed_run"; next }
+    if (is.null(record_path(pile, fingerprints[i], rec, "index"))) next
+    valid_fps <- c(valid_fps, fingerprints[i]); model_map[[fingerprints[i]]] <- rec$model_id
   }
   list(results = results, valid_fps = valid_fps, model_map = model_map)
 }
 
-ensure_projections <- function(pile, pid, fps, model_map) {
-  missing <- fps[vapply(pile$st$mget(fps, namespace = pid), is.null, logical(1))]
+ensure_projections <- function(pile, id, fingerprints, model_map) {
+  missing <- fingerprints[vapply(pile$st$mget(fingerprints, namespace = id), is.null, logical(1))]
   if (length(missing) == 0L) return(invisible())
   models <- vapply(missing, function(fp) model_map[[fp]], character(1))
-  for (mod in unique(models)) project_runs(missing[models == mod], pid, mod, pile)
+  for (mod in unique(models)) project_logs(missing[models == mod], id, mod, pile)
   invisible()
 }
 
-load_projections <- function(pile, pid, fps) {
-  dir <- fs::path(pile$path, "projections", sprintf("projection=%s", pid))
+load_projections <- function(pile, id, fingerprints) {
+  dir <- fs::path(pile$path, "projections", sprintf("projection=%s", id))
   if (!fs::dir_exists(dir)) return(NULL)
   df <- dplyr::collect(dplyr::filter(arrow::open_dataset(dir, format = "parquet"),
-                                     run_fingerprint %in% fps))
-  if (nrow(df) == 0L) list() else split(df, df$run_fingerprint)
+                                     fingerprint %in% fingerprints))
+  if (nrow(df) == 0L) list() else split(df, df$fingerprint)
 }
 
-predicate_names_for <- function(pset, pid)
-  names(pset)[vapply(pset, function(p) identical(p$projection_id, pid), logical(1))]
+predicate_names_for <- function(pset, id)
+  names(pset)[vapply(pset, function(p) identical(p$id, id), logical(1))]
 
 allometry_in_range <- function(proj) {
   h <- proj$height_mean

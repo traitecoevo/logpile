@@ -30,9 +30,9 @@ test_that("happy path from README runs successfully", {
   # 4. Run draws and evaluate predicates.
   # (n=2 for speed, skipping compare)
   m <- manifest(template, priors, 2L)
-  fps <- run(m, pile = pile)
+  fingerprints <- run(m, pile = pile)
   
-  evals <- evaluate_predicates(fps, pile, keep)
+  evals <- evaluate_predicates(fingerprints, pile, keep)
   
   # 5. Inspect and verify
   expect_equal(length(evals), 2L)
@@ -49,7 +49,7 @@ test_that("happy path from README runs successfully", {
   res_knn <- knn(query_val, k = 1, model = "FF16@v1", pile = pile)
   expect_s3_class(res_knn, "data.frame")
   expect_equal(nrow(res_knn), 1L)
-  expect_true("run_fingerprint" %in% names(res_knn))
+  expect_true("fingerprint" %in% names(res_knn))
 
   # test gap
   candidates <- data.frame(rho = c(600, 1000), hmat = c(5, 12))

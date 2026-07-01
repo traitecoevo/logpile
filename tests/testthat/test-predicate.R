@@ -84,10 +84,10 @@ test_that("predicate_set hash is order-insensitive", {
   expect_identical(as.character(s1), as.character(s2))
 })
 
-test_that("predicate_set carries projection_id per entry", {
+test_that("predicate_set carries id per entry", {
   ps <- predicate_set(c("basal_area_bounded", "drought_mortality_size_structured"))
-  expect_equal(ps[["basal_area_bounded"]]$projection_id,   "stand_summary@v1")
-  expect_equal(ps[["drought_mortality_size_structured"]]$projection_id, "size_field@v1")
+  expect_equal(ps[["basal_area_bounded"]]$id,   "stand_summary@v1")
+  expect_equal(ps[["drought_mortality_size_structured"]]$id, "size_field@v1")
 })
 
 test_that("evaluate_predicates returns 'failed_predicate' on failure", {
@@ -98,7 +98,7 @@ test_that("evaluate_predicates returns 'failed_predicate' on failure", {
   req <- make_mock_request(model_id = "FF16@v1", lma = 0.08)
   fp <- request_fingerprint(req)
   log <- make_mock_log(fp)
-  pile_put(pile, fp, log, list(request = req))
+  put_log(pile, fp, log, list(request = req))
 
   # register a trivially-failing predicate
   register_predicate("__test_fail__", function(proj) FALSE, "stand_summary@v1")
@@ -117,7 +117,7 @@ test_that("evaluate_predicates returns 'passed' when all predicates pass", {
   req <- make_mock_request(model_id = "FF16@v1", lma = 0.08)
   fp <- request_fingerprint(req)
   log <- make_mock_log(fp)
-  pile_put(pile, fp, log, list(request = req))
+  put_log(pile, fp, log, list(request = req))
 
   register_predicate("__test_pass__", function(proj) TRUE, "stand_summary@v1")
   on.exit(rm("__test_pass__", envir = logpile:::.predicate_registry), add = TRUE)

@@ -123,7 +123,7 @@ run_plant <- function(resolved_request) {
   if (inherits(res, "PlantFailure")) return(res)
 
   fp <- request_fingerprint(req)
-  coerced_log <- coerce_log(res$species, fp, res$p$node_schedule_times)
+  coerced_log <- format_log(res$species, fp, res$p$node_schedule_times)
 
   list(
     log = coerced_log,
@@ -145,14 +145,14 @@ add_double_cols <- function(tbl, df, exclude) {
 #' Enforces rigid types at the boundary.
 #'
 #' @param df Raw species log data frame from run_plant.
-#' @param run_fingerprint Character SHA-256 fingerprint of the run.
+#' @param fingerprint Character SHA-256 fingerprint of the run.
 #' @param realised_schedule List of realised schedule times per strategy.
 #' @return A coerced tibble with explicit schemas for Parquet serialization.
 #' @importFrom dplyr %>%
-coerce_log <- function(df, run_fingerprint, realised_schedule) {
+format_log <- function(df, fingerprint, realised_schedule) {
   exclude <- c("step", "species", "node", "time")
   if (is.null(df) || nrow(df) == 0L) {
-    skel <- tibble::tibble(run_fingerprint = character(0), strategy_id = integer(0),
+    skel <- tibble::tibble(fingerprint = character(0), strategy_id = integer(0),
                            cohort_id = integer(0), birth_time = double(0), t = double(0))
     return(if (is.null(df)) skel else add_double_cols(skel, df, exclude))
   }
@@ -163,7 +163,7 @@ coerce_log <- function(df, run_fingerprint, realised_schedule) {
   cohort_id   <- as.integer(df$node)
   offsets     <- cumsum(c(0L, vapply(realised_schedule, length, integer(1L))))
   birth_time  <- unlist(realised_schedule)[offsets[strategy_id + 1L] + cohort_id]
-  tbl <- tibble::tibble(run_fingerprint = as.character(run_fingerprint),
+  tbl <- tibble::tibble(fingerprint = as.character(fingerprint),
                         strategy_id = strategy_id, cohort_id = cohort_id,
                         birth_time = as.double(birth_time), t = as.double(df$time))
   add_double_cols(tbl, df, exclude)

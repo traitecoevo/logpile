@@ -80,24 +80,24 @@ sort_strategies_and_schedule <- function(strategies, schedule) {
 
 #' Parse Request Model ID
 #'
-#' @param mid Model ID string (e.g. "FF16@v1").
+#' @param model_id Model ID string (e.g. "FF16@v1").
 #' @return A list with `model` and `semantics_version` fields.
 #' @keywords internal
-parse_model_id <- function(mid) {
-  if (!is.character(mid) || length(mid) != 1L) {
+parse_model_id <- function(model_id) {
+  if (!is.character(model_id) || length(model_id) != 1L) {
     stop("Model ID must be a single string.", call. = FALSE)
   }
 
-  parts <- strsplit(mid, "@v", fixed = TRUE)[[1L]]
+  parts <- strsplit(model_id, "@v", fixed = TRUE)[[1L]]
   if (length(parts) != 2L) {
-    stop(sprintf("Unsupported model ID format: '%s'. Expected format 'Model@vX'.", mid), call. = FALSE)
+    stop(sprintf("Unsupported model ID format: '%s'. Expected format 'Model@vX'.", model_id), call. = FALSE)
   }
 
   model <- parts[1L]
   semantics_version <- suppressWarnings(as.integer(parts[2L]))
 
   if (is.na(semantics_version) || semantics_version < 1L) {
-    stop(sprintf("Unsupported model ID: '%s'. Version must be a positive integer.", mid), call. = FALSE)
+    stop(sprintf("Unsupported model ID: '%s'. Version must be a positive integer.", model_id), call. = FALSE)
   }
 
   list(model = model, semantics_version = semantics_version)
@@ -148,7 +148,7 @@ request_fingerprint <- function(request) {
 #'
 #' @param driver_set A named list of spline knots.
 #' @return A 64-character hex string SHA-256 hash.
-driver_set_hash <- function(driver_set) {
+driver_set_fingerprint <- function(driver_set) {
   raw_cbor <- canonical_cbor(driver_set)
   secretbase::sha256(raw_cbor, convert = TRUE)
 }
@@ -320,15 +320,15 @@ resolve_request <- function(request) {
     stop(sprintf("Unknown top-level fields in request: %s", paste(extra_keys, collapse = ", ")), call. = FALSE)
   }
 
-  mid <- request$model_id %||% "FF16@v1"
-  parsed_id <- parse_model_id(mid)
+  model_id <- request$model_id %||% "FF16@v1"
+  parsed_id <- parse_model_id(model_id)
   schema <- get_model_schema(parsed_id$model)
 
   global <- resolve_global(request$global, schema)
   strats <- resolve_strategies(request$strategies, schema)
 
   list(
-    model_id = mid,
+    model_id = model_id,
     global = global,
     control = resolve_control(request$control, schema),
     strategies = strats,

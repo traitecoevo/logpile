@@ -7,13 +7,13 @@
 #' @return A character fingerprint (invisibly).
 evaluate_request <- function(req, pile) {
   fp <- request_fingerprint(req)
-  if (pile_has(pile, fp)) return(invisible(fp))
+  if (has_log(pile, fp)) return(invisible(fp))
 
   res <- run_plant(req)
   meta <- list(
     request = req, 
     design_coords = attr(req, "design_coords"),
-    build_hash = get_build_hash()
+    build_fingerprint = get_build_fingerprint()
   )
   
   if (inherits(res, "PlantFailure")) {
@@ -24,23 +24,23 @@ evaluate_request <- function(req, pile) {
     meta$solver_steps <- res$solver_steps
   }
   
-  pile_put(pile, fp, payload, meta)
+  put_log(pile, fp, payload, meta)
   invisible(fp)
 }
 
 .run_env <- new.env(parent = emptyenv())
 
-get_build_hash <- function() {
-  if (is.null(.run_env$build_hash)) {
-    .run_env$build_hash <- sprintf("R-%s_plant-%s", getRversion(), utils::packageVersion("plant"))
+get_build_fingerprint <- function() {
+  if (is.null(.run_env$build_fingerprint)) {
+    .run_env$build_fingerprint <- sprintf("R-%s_plant-%s", getRversion(), utils::packageVersion("plant"))
   }
-  .run_env$build_hash
+  .run_env$build_fingerprint
 }
 
-write_coverage <- function(pile, model_id, coords, fps) {
+write_coverage <- function(pile, model_id, coords, fingerprints) {
   cov_df <- coords
   cov_df$log_q <- NULL
-  cov_df$run_fingerprint <- fps
+  cov_df$fingerprint <- fingerprints
   cov_df$status <- "pending"
   
   uuid_str <- gsub("-", "", uuid::UUIDgenerate())
@@ -51,7 +51,7 @@ write_coverage <- function(pile, model_id, coords, fps) {
 
 #' Run Campaign Manifest Idempotently
 #'
-#' Evaluates a manifest of campaigns, bypassing done runs.
+#' Evaluates a manifest of campaigns, bypassing done logs.
 #'
 #' @param manifest A manifest list.
 #' @param pile A `logpile_pile` object.
@@ -66,20 +66,20 @@ run <- function(manifest, pile = get_active_pile(), workers = 1L) {
   n <- nrow(manifest$coords)
   if (n == 0L) return(invisible(character(0)))
   
-  fps <- vapply(seq_len(n), function(i) {
+  fingerprints <- vapply(seq_len(n), function(i) {
     req <- place_coords(manifest$template, manifest$coords[i, , drop = FALSE])
     request_fingerprint(req)
   }, character(1))
   
-  cached <- vapply(fps, function(fp) pile_has(pile, fp), logical(1))
+  cached <- vapply(fingerprints, function(fp) has_log(pile, fp), logical(1))
   if (all(cached)) {
-    return(invisible(fps))
+    return(invisible(fingerprints))
   }
   
   pending_idx <- which(!cached)
   model_id <- manifest$template$model_id %||% "FF16@v1"
   
-  write_coverage(pile, model_id, manifest$coords[pending_idx, , drop = FALSE], fps[pending_idx])
+  write_coverage(pile, model_id, manifest$coords[pending_idx, , drop = FALSE], fingerprints[pending_idx])
   
   manifest$coords <- manifest$coords[pending_idx, , drop = FALSE]
   n_pending <- nrow(manifest$coords)
@@ -100,7 +100,7 @@ run <- function(manifest, pile = get_active_pile(), workers = 1L) {
   message(sprintf("Compacting parquet files for %s...", model_id))
   compact_pile(pile, model_id)
   
-  invisible(fps)
+  invisible(fingerprints)
 }
 
 # --- Internal Parallel Helpers ---
@@ -128,13 +128,13 @@ get_pkg_root <- function() {
 
 fallback_log_crash <- function(req, pile, err_msg) {
   h <- request_fingerprint(req)
-  if (!pile_has(pile, h)) {
+  if (!has_log(pile, h)) {
     meta <- list(
       request = req, 
       design_coords = attr(req, "design_coords"),
-      build_hash = get_build_hash()
+      build_fingerprint = get_build_fingerprint()
     )
-    pile_put(pile, h, PlantFailure("crash", sprintf("Worker died: %s", err_msg)), meta)
+    put_log(pile, h, PlantFailure("crash", sprintf("Worker died: %s", err_msg)), meta)
   }
 }
 
@@ -196,7 +196,7 @@ map_workers <- function(manifest, pile, workers) {
       for (idx in chunks[[chunk_idx]]) {
         req <- place_coords(manifest$template, manifest$coords[idx, , drop = FALSE])
         h <- request_fingerprint(req)
-        if (!pile_has(pile, h)) {
+        if (!has_log(pile, h)) {
           fallback_log_crash(req, pile, err_msg)
           break
         }

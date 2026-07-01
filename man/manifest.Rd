@@ -4,7 +4,7 @@
 \alias{manifest}
 \title{Generate Campaign Manifest}
 \usage{
-manifest(template, priors, n, seed = NULL)
+manifest(template, priors, n, seed = 42L)
 }
 \arguments{
 \item{template}{A request list template.}
@@ -13,7 +13,7 @@ manifest(template, priors, n, seed = NULL)
 
 \item{n}{Integer number of samples to draw.}
 
-\item{seed}{Optional integer seed for reproducible Sobol sequences.}
+\item{seed}{Optional integer seed for reproducible Sobol sequences (default: 42).}
 }
 \value{
 A list containing template and coords.
