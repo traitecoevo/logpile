@@ -27,9 +27,18 @@ Key properties:
 
 ## Gotchas
 
-- The cache keys on the **hash of inputs**. If a `plant` change alters simulation *outputs*
-  for the *same inputs* (a behavioural change, not a refactor), cached results become stale
-  silently — the hash won't notice. Invalidate/namespace affected piles deliberately.
+- The cache keys on the **hash of inputs**, and `model_id` (`"FF16@v1"`) is one of those
+  inputs. The scientific version in `model_id` is **not** hand-typed here: `resolve_request()`
+  re-derives it from `plant::model_version()`, so a request carries whatever scientific
+  version the installed `plant` declares. Bumping a model's scientific version in `plant`
+  therefore changes the fingerprint and forces reruns; a software-only `plant` release leaves
+  it untouched and cached results are reused. Callers may pass a bare name (`"FF16"`) or a
+  full id; a pinned version that disagrees with the installed `plant` is a hard error.
+- This covers *versioned* scientific changes. A `plant` maintainer who alters simulation
+  *outputs* without bumping the model's `scientific_version` still produces silently stale
+  hits — plant's drift-guard test catches the default-parameter case, but pure equation
+  changes rely on the maintainer bumping the version. `build_hash` (R + plant package
+  versions) is recorded per run for provenance but does not drive invalidation.
 
 ## Plant family
 

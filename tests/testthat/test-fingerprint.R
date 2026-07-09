@@ -17,10 +17,29 @@ test_that("resolve_request rejects unknown top-level keys", {
   expect_error(resolve_request(req), "Unknown top-level fields")
 })
 
-test_that("resolve_request rejects invalid namespaces", {
-  expect_error(resolve_request(list(model_id = "FF16")), "Unsupported model ID format")
+test_that("resolve_request rejects malformed model ids", {
   expect_error(resolve_request(list(model_id = "FF16@v0")), "Unsupported model ID")
   expect_error(resolve_request(list(model_id = "FF16@v")), "Unsupported model ID format")
+  expect_error(resolve_request(list(model_id = "FF16@vX")), "Unsupported model ID")
+})
+
+test_that("resolve_request derives the scientific version from plant", {
+  # A bare model name is accepted and resolved to plant's authoritative version.
+  expect_equal(resolve_request(list(model_id = "FF16"))$model_id,
+               plant::model_id("FF16"))
+  # A matching pinned version is accepted; the id is normalised via plant.
+  expect_equal(resolve_request(list(model_id = plant::model_id("FF16")))$model_id,
+               plant::model_id("FF16"))
+  # Bare and pinned resolve identically, so existing archives stay valid.
+  expect_identical(
+    request_fingerprint(resolve_request(list(model_id = "FF16"))),
+    request_fingerprint(resolve_request(list(model_id = plant::model_id("FF16"))))
+  )
+})
+
+test_that("resolve_request errors when a pinned version disagrees with plant", {
+  expect_error(resolve_request(list(model_id = "FF16@v99")),
+               "pins scientific version")
 })
 
 test_that("request_fingerprint asserts resolved input", {

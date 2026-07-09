@@ -80,17 +80,31 @@ sort_strategies_and_schedule <- function(strategies, schedule) {
 
 #' Parse Request Model ID
 #'
-#' @param mid Model ID string (e.g. "FF16@v1").
-#' @return A list with `model` and `semantics_version` fields.
+#' Accepts either a bare model name (`"FF16"`) or a fully-qualified id carrying
+#' a scientific version (`"FF16@v1"`). The scientific version is authored in the
+#' `plant` package (see [resolve_request()], which re-derives it); a bare name
+#' returns `semantics_version = NA` and is resolved against `plant`.
+#'
+#' @param mid Model ID string (e.g. "FF16" or "FF16@v1").
+#' @return A list with `model` and `semantics_version` (integer, or `NA` when
+#'   the id carries no `@vX` suffix) fields.
 #' @keywords internal
 parse_model_id <- function(mid) {
   if (!is.character(mid) || length(mid) != 1L) {
     stop("Model ID must be a single string.", call. = FALSE)
   }
 
+  if (!grepl("@", mid, fixed = TRUE)) {
+    # bare model name, no version pinned
+    if (!nzchar(mid)) {
+      stop(sprintf("Unsupported model ID format: '%s'. Expected 'Model' or 'Model@vX'.", mid), call. = FALSE)
+    }
+    return(list(model = mid, semantics_version = NA_integer_))
+  }
+
   parts <- strsplit(mid, "@v", fixed = TRUE)[[1L]]
-  if (length(parts) != 2L) {
-    stop(sprintf("Unsupported model ID format: '%s'. Expected format 'Model@vX'.", mid), call. = FALSE)
+  if (length(parts) != 2L || !nzchar(parts[1L]) || !nzchar(parts[2L])) {
+    stop(sprintf("Unsupported model ID format: '%s'. Expected 'Model' or 'Model@vX'.", mid), call. = FALSE)
   }
 
   model <- parts[1L]
@@ -101,6 +115,26 @@ parse_model_id <- function(mid) {
   }
 
   list(model = model, semantics_version = semantics_version)
+}
+
+#' Scientific version of a model, from the installed `plant`
+#'
+#' The scientific version is the single source of truth in `plant`
+#' (`plant::model_version()`); logpile reads it so cache invalidation tracks
+#' scientific changes rather than software releases.
+#'
+#' @param model Bare model name, e.g. "FF16".
+#' @return The scientific version integer reported by `plant`.
+#' @keywords internal
+plant_model_version <- function(model) {
+  if (!exists("model_version", where = asNamespace("plant"), mode = "function")) {
+    stop(
+      "The installed 'plant' does not provide model_version(); ",
+      "update plant to a version with per-model scientific versioning.",
+      call. = FALSE
+    )
+  }
+  plant::model_version(model)
 }
 
 is_resolved_request <- function(x) {
@@ -320,9 +354,28 @@ resolve_request <- function(request) {
     stop(sprintf("Unknown top-level fields in request: %s", paste(extra_keys, collapse = ", ")), call. = FALSE)
   }
 
-  mid <- request$model_id %||% "FF16@v1"
-  parsed_id <- parse_model_id(mid)
-  schema <- get_model_schema(parsed_id$model)
+  requested <- request$model_id %||% "FF16"
+  parsed_id <- parse_model_id(requested)
+  model <- parsed_id$model
+
+  # The scientific version is authoritative in `plant`, not in the request:
+  # re-derive it so the fingerprint tracks scientific changes (rerun) and
+  # ignores software-only releases (reuse). A caller may still pass a bare
+  # name ("FF16") or a full id ("FF16@v1"); a pinned version that disagrees
+  # with the installed plant is a hard error rather than a silent stale hit.
+  plant_version <- plant_model_version(model)
+  if (!is.na(parsed_id$semantics_version) &&
+      parsed_id$semantics_version != plant_version) {
+    stop(sprintf(
+      paste0("Requested model_id '%s' pins scientific version %d, but the ",
+             "installed plant provides %s. Use '%s' (or a bare '%s'), or ",
+             "install the matching plant."),
+      requested, parsed_id$semantics_version,
+      plant::model_id(model), plant::model_id(model), model),
+      call. = FALSE)
+  }
+  mid <- plant::model_id(model)
+  schema <- get_model_schema(model)
 
   global <- resolve_global(request$global, schema)
   strats <- resolve_strategies(request$strategies, schema)
