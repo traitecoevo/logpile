@@ -81,13 +81,15 @@ sort_strategies_and_schedule <- function(strategies, schedule) {
 #' Parse Request Model ID
 #'
 #' Accepts either a bare model name (`"FF16"`) or a fully-qualified id carrying
-#' a scientific version (`"FF16@v1"`). The scientific version is authored in the
-#' `plant` package (see [resolve_request()], which re-derives it); a bare name
-#' returns `semantics_version = NA` and is resolved against `plant`.
+#' a scientific version (`"FF16@v1"`). The version may be compound for a model
+#' defined relative to another — e.g. `"TF24f@v2.1"`, where TF24f is a fast
+#' approximation of TF24 `v2`. The scientific version is authored in the `plant`
+#' package (see [resolve_request()], which re-derives it); a bare name returns
+#' `version = NA` and is resolved against `plant`.
 #'
-#' @param mid Model ID string (e.g. "FF16" or "FF16@v1").
-#' @return A list with `model` and `semantics_version` (integer, or `NA` when
-#'   the id carries no `@vX` suffix) fields.
+#' @param mid Model ID string (e.g. "FF16", "FF16@v1", or "TF24f@v2.1").
+#' @return A list with `model` and `version` (a version string such as `"1"` or
+#'   `"2.1"`, or `NA` when the id carries no `@vX` suffix) fields.
 #' @keywords internal
 parse_model_id <- function(mid) {
   if (!is.character(mid) || length(mid) != 1L) {
@@ -99,7 +101,7 @@ parse_model_id <- function(mid) {
     if (!nzchar(mid)) {
       stop(sprintf("Unsupported model ID format: '%s'. Expected 'Model' or 'Model@vX'.", mid), call. = FALSE)
     }
-    return(list(model = mid, semantics_version = NA_integer_))
+    return(list(model = mid, version = NA_character_))
   }
 
   parts <- strsplit(mid, "@v", fixed = TRUE)[[1L]]
@@ -108,13 +110,14 @@ parse_model_id <- function(mid) {
   }
 
   model <- parts[1L]
-  semantics_version <- suppressWarnings(as.integer(parts[2L]))
+  version <- parts[2L]
 
-  if (is.na(semantics_version) || semantics_version < 1L) {
-    stop(sprintf("Unsupported model ID: '%s'. Version must be a positive integer.", mid), call. = FALSE)
+  # One or more dot-separated integers, leading component >= 1 (e.g. "1", "2.1").
+  if (!grepl("^[1-9][0-9]*(\\.[0-9]+)*$", version)) {
+    stop(sprintf("Unsupported model ID: '%s'. Version must be a positive integer, optionally dot-separated (e.g. '2.1').", mid), call. = FALSE)
   }
 
-  list(model = model, semantics_version = semantics_version)
+  list(model = model, version = version)
 }
 
 #' Scientific version of a model, from the installed `plant`
@@ -124,7 +127,8 @@ parse_model_id <- function(mid) {
 #' scientific changes rather than software releases.
 #'
 #' @param model Bare model name, e.g. "FF16".
-#' @return The scientific version integer reported by `plant`.
+#' @return The scientific version string reported by `plant` (e.g. `"1"` or,
+#'   for a compound version, `"2.1"`).
 #' @keywords internal
 plant_model_version <- function(model) {
   if (!exists("model_version", where = asNamespace("plant"), mode = "function")) {
@@ -364,13 +368,13 @@ resolve_request <- function(request) {
   # name ("FF16") or a full id ("FF16@v1"); a pinned version that disagrees
   # with the installed plant is a hard error rather than a silent stale hit.
   plant_version <- plant_model_version(model)
-  if (!is.na(parsed_id$semantics_version) &&
-      parsed_id$semantics_version != plant_version) {
+  if (!is.na(parsed_id$version) &&
+      !identical(parsed_id$version, plant_version)) {
     stop(sprintf(
-      paste0("Requested model_id '%s' pins scientific version %d, but the ",
+      paste0("Requested model_id '%s' pins scientific version %s, but the ",
              "installed plant provides %s. Use '%s' (or a bare '%s'), or ",
              "install the matching plant."),
-      requested, parsed_id$semantics_version,
+      requested, parsed_id$version,
       plant::model_id(model), plant::model_id(model), model),
       call. = FALSE)
   }

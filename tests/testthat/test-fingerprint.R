@@ -42,6 +42,18 @@ test_that("resolve_request errors when a pinned version disagrees with plant", {
                "pins scientific version")
 })
 
+test_that("resolve_request handles compound versions (TF24f@vX.Y)", {
+  # TF24f is a fast approximation of TF24, so plant reports a compound version.
+  expect_match(plant::model_version("TF24f"), "\\.")
+  expect_equal(resolve_request(list(model_id = "TF24f"))$model_id,
+               plant::model_id("TF24f"))
+  expect_equal(resolve_request(list(model_id = plant::model_id("TF24f")))$model_id,
+               plant::model_id("TF24f"))
+  # A wrong compound version is rejected.
+  wrong <- sprintf("TF24f@v%s.999", sub("\\..*$", "", plant::model_version("TF24f")))
+  expect_error(resolve_request(list(model_id = wrong)), "pins scientific version")
+})
+
 test_that("request_fingerprint asserts resolved input", {
   req <- list(strategies = list(list(lma = 0.08)))
   expect_error(request_fingerprint(req), "requires a resolved request")

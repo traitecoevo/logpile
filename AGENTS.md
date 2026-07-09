@@ -33,7 +33,9 @@ Key properties:
   version the installed `plant` declares. Bumping a model's scientific version in `plant`
   therefore changes the fingerprint and forces reruns; a software-only `plant` release leaves
   it untouched and cached results are reused. Callers may pass a bare name (`"FF16"`) or a
-  full id; a pinned version that disagrees with the installed `plant` is a hard error.
+  full id; a pinned version that disagrees with the installed `plant` is a hard error. The
+  version may be compound — e.g. `TF24f@v2.1`, since TF24f is a fast approximation of TF24
+  (major = the TF24 version it tracks, minor = its own approximation revision).
 - This covers *versioned* scientific changes. A `plant` maintainer who alters simulation
   *outputs* without bumping the model's `scientific_version` still produces silently stale
   hits — plant's drift-guard test catches the default-parameter case, but pure equation
