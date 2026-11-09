@@ -208,8 +208,12 @@ get_model_schema <- function(model_type) {
     s0$pars <- NULL
   }
 
-  make_hp_fun <- tryCatch(plant::make_hyperpar(model_type), error = function(e) NULL)
-  hp_names <- if (!is.null(make_hp_fun)) names(formals(make_hp_fun)) else character(0)
+  ## The trade-off coefficients a request may set in `global`: read off plant's
+  ## frozen testing trade-off closure (plant#731), which records the
+  ## coefficients it was built with; K93's identity records none.
+  hp_fun <- tryCatch(plant::default_hyperpar(model_type), error = function(e) NULL)
+  hp_names <- if (!is.null(hp_fun)) names(attr(hp_fun, "coefficients")) else character(0)
+  if (is.null(hp_names)) hp_names <- character(0)
 
   list(p0 = p0, s0 = s0, hp_names = hp_names)
 }

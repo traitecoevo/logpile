@@ -18,11 +18,17 @@ PlantFailure <- function(reason, message, last_t = NULL, partial_log = NULL) {
   )
 }
 
-# The model's hyperparameter function, configured from global settings.
+# The model's trade-off (hyperparameter) function: plant's frozen testing
+# trade-offs (plant#731), with any coefficient the request's `global` names
+# overriding the frozen value. The closure records the coefficients it was
+# built with in attr(, "coefficients"), which is also where get_model_schema()
+# reads the allowed `global` names.
 hyperpar <- function(model, global) {
-  hp <- tryCatch(plant::make_hyperpar(model), error = function(e) NULL)
-  if (is.null(hp)) return(function(m, s) m)
-  do.call(hp, global[intersect(names(global), names(formals(hp)))])
+  hp <- tryCatch(plant::default_hyperpar(model), error = function(e) NULL)
+  if (is.null(hp)) return(function(m, s, filter = TRUE) m)
+  overrides <- global[intersect(names(global), names(attr(hp, "coefficients")))]
+  if (length(overrides) == 0L) return(hp)
+  do.call(plant::default_hyperpar, c(list(model), overrides))
 }
 
 # Trait columns the hyperpar function synthesises (must not be fed as inputs).
@@ -46,6 +52,9 @@ build_scm <- function(req) {
   hp_fn <- hyperpar(model, req$global)
 
   p <- plant::scm_base_parameters(model)
+  ## Carried on the Parameters too (plant#731), so a saved or replayed `p`
+  ## describes the trade-offs its strategies were built with.
+  p$hyperpar <- hp_fn
   p$patch_area <- req$global$patch_area
   p$max_patch_lifetime <- req$global$max_patch_lifetime
 
