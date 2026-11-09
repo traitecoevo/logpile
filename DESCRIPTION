@@ -26,4 +26,4 @@ Imports:
     storr,
     tibble,
 Remotes:
-    traitecoevo/plant@c00100d5
+    traitecoevo/plant@develop
