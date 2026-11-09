@@ -211,7 +211,7 @@ get_model_schema <- function(model_type) {
   ## The trade-off coefficients a request may set in `global`: read off plant's
   ## frozen testing trade-off closure (plant#731), which records the
   ## coefficients it was built with; K93's identity records none.
-  hp_fun <- tryCatch(plant::default_hyperpar(model_type), error = function(e) NULL)
+  hp_fun <- plant_default_hyperpar(model_type)
   hp_names <- if (!is.null(hp_fun)) names(attr(hp_fun, "coefficients")) else character(0)
   if (is.null(hp_names)) hp_names <- character(0)
 

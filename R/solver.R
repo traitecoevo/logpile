@@ -18,13 +18,23 @@ PlantFailure <- function(reason, message, last_t = NULL, partial_log = NULL) {
   )
 }
 
+# plant's frozen trade-off closure for a model, or NULL for a model plant does
+# not know. Only that refusal is absorbed: any other error from plant is a
+# fault to surface, not a reason to run with identity trade-offs.
+plant_default_hyperpar <- function(model, ...) {
+  tryCatch(plant::default_hyperpar(model, ...), error = function(e) {
+    if (grepl("Unknown type", conditionMessage(e), fixed = TRUE)) return(NULL)
+    stop(e)
+  })
+}
+
 # The model's trade-off (hyperparameter) function: plant's frozen testing
 # trade-offs (plant#731), with any coefficient the request's `global` names
 # overriding the frozen value. The closure records the coefficients it was
 # built with in attr(, "coefficients"), which is also where get_model_schema()
 # reads the allowed `global` names.
 hyperpar <- function(model, global) {
-  hp <- tryCatch(plant::default_hyperpar(model), error = function(e) NULL)
+  hp <- plant_default_hyperpar(model)
   if (is.null(hp)) return(function(m, s, filter = TRUE) m)
   overrides <- global[intersect(names(global), names(attr(hp, "coefficients")))]
   if (length(overrides) == 0L) return(hp)
