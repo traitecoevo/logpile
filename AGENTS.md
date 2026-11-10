@@ -42,6 +42,22 @@ Key properties:
   changes rely on the maintainer bumping the version. `build_hash` (R + plant package
   versions) is recorded per run for provenance but does not drive invalidation.
 
+## Writing in this guide
+
+This file is read in full at the start of every agent session, as current
+instructions, by a reader who was not in your session and cannot tell which
+parts are out of date. When you change it:
+
+- Write what is true now, in the present tense. If something here turns out to
+  be wrong, replace it; the story of how you found out belongs in the PR.
+- Give each rule its reason, in plain case. A reason persuades where capitals
+  and warning signs do not.
+- Point to where a value lives (`DESCRIPTION`, a header, a Makefile target)
+  rather than copying the value, and leave out anything a fresh clone cannot
+  resolve, such as local paths or notes from one session.
+- Write in complete sentences that say what happens and what it causes, using
+  names that already exist in the code.
+
 ## Plant family
 
 `logpile` is part of the **plant family** in the [`traitecoevo`](https://github.com/traitecoevo)
