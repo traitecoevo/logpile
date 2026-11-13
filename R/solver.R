@@ -61,7 +61,7 @@ build_scm <- function(req) {
 
   hp_fn <- hyperpar(model, req$global)
 
-  p <- plant::scm_base_parameters(model)
+  p <- plant::base_parameters(model)
   ## Carried on the Parameters too (plant#731), so a saved or replayed `p`
   ## describes the trade-offs its strategies were built with.
   p$hyperpar <- hp_fn
@@ -69,11 +69,14 @@ build_scm <- function(req) {
   p$max_patch_lifetime <- req$global$max_patch_lifetime
 
   if (length(req$strategies) > 0L) {
-    s0 <- get(paste0(model, "_Strategy"), asNamespace("plant"))()
+    s0 <- get(paste0(model, "_Model"), asNamespace("plant"))()
     gen_cols <- generated_cols(hp_fn, s0)
 
     traits <- as.matrix(dplyr::bind_rows(req$strategies))
-    valid_names <- c(names(s0), if (!is.null(s0$pars)) names(s0$pars) else character(0))
+    ## What plant accepts as a trait: the model's parameters and its numeric
+    ## top-level strategy fields, not control or the birth-rate settings.
+    tab <- plant::parameter_table(model)
+    valid_names <- tab$name[tab$group != "control"]
     input_traits <- intersect(colnames(traits), valid_names)
     input_traits <- setdiff(input_traits, gen_cols)
     traits <- traits[, input_traits, drop = FALSE]
@@ -128,13 +131,13 @@ run_plant <- function(resolved_request) {
   t_start <- proc.time()
 
   res <- tryCatch({
-    plant::run_scm(
-      p = args$p,
+    plant::tidy(plant::run(
+      args$p,
       env = args$env,
-      ctrl = args$ctrl,
+      control = args$ctrl,
       refine_schedule = req$control$refine_schedule,
-      collect = TRUE
-    )
+      record = "steps"
+    ))
   }, error = function(e) {
     PlantFailure("exception", e$message)
   })
