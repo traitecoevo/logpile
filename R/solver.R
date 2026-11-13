@@ -73,8 +73,9 @@ build_scm <- function(req) {
     gen_cols <- generated_cols(hp_fn, s0)
 
     traits <- as.matrix(dplyr::bind_rows(req$strategies))
-    ## What plant accepts as a trait: the model's parameters and its numeric
-    ## top-level strategy fields, not control or the birth-rate settings.
+    ## What plant accepts as a trait: the model's parameters, its numeric
+    ## top-level strategy fields and the traits its trade-offs consume (narea),
+    ## not control or the birth-rate settings.
     tab <- plant::parameter_table(model)
     valid_names <- tab$name[tab$group != "control"]
     input_traits <- intersect(colnames(traits), valid_names)
