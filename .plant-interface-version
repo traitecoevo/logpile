@@ -1,0 +1,17 @@
+# The plant ref this package was last built and checked against, and the plant
+# breaking changes it has absorbed. Same convention as regnans and fieldtrial.
+migrated_on: 2026-11-14
+plant_version: 2.0.0.9002
+plant_ref: develop@83a973ff (2026-11-14; odelia 0.11.1 @v0.11.1, phylloptim 0.36.0)
+applied_breaking_changes:
+  - tradeoffs-travel-with-parameters  # plant#731: trade-offs read from default_hyperpar() and carried on p$hyperpar (logpile#7)
+  - model-classes-renamed  # plant#760 (#641): *_Strategy -> *_Model, built here as paste0(model, "_Model")
+  - unknown-traits-refused  # plant#636: only parameter_table() names (minus control) are passed as traits. The rest were appended to pars and ignored before; a consumed trait (FF16's narea) was dropped before and now reaches the trade-offs
+  - one-run-verb  # plant#779 (#428): run_scm(..., collect = TRUE) -> tidy(run(..., record = "steps")); scm_base_parameters() -> base_parameters()
+# Checked and not affected: Parameters$patch_type -> fitness_weighting and the
+# fitness values moved to the patch (plant#781): neither is read here, and the
+# fingerprint keeps only numeric and logical scalars of p, so the renamed
+# string field does not move a fingerprint. NodeSchedule -> Schedule (#752).
+# Fingerprints of the TF24 family do move with plant itself: #745 removed TF24f's
+# use_ad_gradient and psi_fd_step, #762 removed unused TF24 pars, and #746 renamed
+# the log column opt_psi_stem -> opt_psi_leaf.

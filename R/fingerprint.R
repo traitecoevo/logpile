@@ -197,8 +197,8 @@ driver_set_hash <- function(driver_set) {
 #' @return A list containing base parameters, strategy defaults, and hyperparameter names.
 #' @keywords internal
 get_model_schema <- function(model_type) {
-  p0 <- plant::scm_base_parameters(model_type)
-  s0_obj <- get(paste0(model_type, "_Strategy"), asNamespace("plant"))()
+  p0 <- plant::base_parameters(model_type)
+  s0_obj <- get(paste0(model_type, "_Model"), asNamespace("plant"))()
   
   s0 <- as.list(s0_obj)
   if (!is.null(s0$pars)) {
